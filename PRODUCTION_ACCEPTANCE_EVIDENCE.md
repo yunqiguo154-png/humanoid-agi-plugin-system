@@ -7,9 +7,9 @@ This file records the current local RC evidence status. Do not treat missing or 
 | Item | Evidence |
 |------|----------|
 | CI run URL | Missing. `gh` CLI was unavailable; see `evidence/ci_result.json`. |
-| Commit SHA | Pre-commit / Missing until the first RC commit is created. Regenerate `evidence/environment.json` after commit. |
-| Branch | `main` after local `git init`; see regenerated `evidence/environment.json` in the working evidence bundle. |
-| Working tree status | Not clean before the first RC commit. Evidence JSON files are local artifacts and are ignored by Git. |
+| Commit SHA | `6ccee043e61859e310efe454737ac92c399c26af` local RC commit. |
+| Branch | `main`. |
+| Working tree status | Clean after the local RC commit. Evidence JSON files are local artifacts and are ignored by Git. |
 | Release candidate tag | `v0.9.0-rc1` candidate only, not GA. |
 | Approver | Missing. No risk acceptance or release approval was provided. |
 | final go/no-go decision | NO_GO. See `evidence/release_gate.json`. |
@@ -136,7 +136,7 @@ List accepted risks from `RISK_REGISTER.md`, including owner and expiry/review d
 
 | Evidence | Status |
 | --- | --- |
-| `evidence/environment.json` | warn, production_blocking until a committed SHA exists and the target Linux evidence is collected. |
+| `evidence/environment.json` | warn because this is a Windows workstation, not target Linux+bwrap production evidence. |
 | `evidence/local_quality_gate.json` | pass locally: unittest, ruff, mypy, coverage 71%. |
 | `evidence/ci_result.json` | missing, production_blocking. |
 | `evidence/doctor.json` | fail, production_blocking. |
