@@ -1,0 +1,34 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+.env
+.env.*
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+dist/
+build/
+*.egg-info/
+*.zip
+.DS_Store
+Thumbs.db
+
+# Runtime and test artifacts
+data/
+plugins/
+
+# Local scratch demos that are not part of the RC source tree
+my_first_plugin/
+test_run.py
+
+# Evidence can contain machine-specific paths, logs, scanner output, or audit data.
+# Keep only sanitized placeholders in git.
+evidence/*.json
+evidence/*.txt
+evidence/*.jsonl
+!evidence/.gitkeep

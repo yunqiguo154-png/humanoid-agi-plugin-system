@@ -1,0 +1,196 @@
+# Humanoid AGI 插件系统架构与需求说明书
+
+**版本**: v1.0
+**日期**: 2026-05-06
+**状态**: 待开发
+
+---
+
+## 1. 项目背景与目标
+
+### 1.1 背景
+当前系统 (`modules/plugin_system/`) 仅实现了一个基础 Mock 版插件系统：
+- 使用 `importlib` 直接加载代码，无隔离。
+- 沙箱仅基于 `psutil` 监控进程内存，无法拦截恶意操作。
+- 插件市场接口返回假数据，无真实分发能力。
+
+### 1.2 目标
+构建一个**生产级、安全、可扩展**的插件系统，支持：
+- **多模式运行**：官方插件进程内加载，第三方插件子进程隔离。
+- **严格沙箱**：基于 OS 级沙箱 (Sandbox) 限制文件/网络/系统调用。
+- **标准规范**：统一 `plugin.yaml` 格式，支持打包、签名、版本管理。
+- **丰富扩展点**：支持工具 (Tools)、中间件 (Middleware)、事件 (Events) 等扩展。
+
+---
+
+## 2. 核心架构设计
+
+### 2.1 架构概览
+
+```text
+┌─────────────────────────────────────────────────────────┐
+│                    Humanoid AGI 核心                      │
+│  (Thinking, Memory, Output, Security)                   │
+├─────────────────────────────────────────────────────────┤
+│  插件引擎 (Plugin Engine)                                │
+│  ├─ 加载器 (Loader): 发现/解析/加载插件包                │
+│  ├─ 沙箱管理器 (Sandbox Manager): 进程隔离/权限控制      │
+│  ├─ 事件总线 (Event Bus): 插件间/系统间通信              │
+│  └─ API 网关 (API Gateway): 权限校验/能力暴露            │
+├─────────────────────────────────────────────────────────┤
+│  插件实例 (Plugins)                                      │
+│  ├─ [官方插件] -> 进程内加载 (高性能)                    │
+│  └─ [第三方插件] -> 子进程隔离 (高安全)                  │
+└─────────────────────────────────────────────────────────┘
+```
+
+### 2.2 运行模式选择
+
+| 模式 | 适用场景 | 实现方式 |
+|------|----------|----------|
+| **进程内 (In-Process)** | 官方插件、受信任插件 | `importlib` 直接导入 |
+| **子进程 (Sub-Process)** | 第三方插件、用户插件 | `multiprocessing` + 隔离环境 |
+
+---
+
+## 3. 插件规范
+
+### 3.1 标准目录结构
+
+插件应打包为 `.zip` 或遵循以下目录结构：
+
+```text
+my_plugin/
+├── plugin.yaml          # 插件元数据 (核心)
+├── src/
+│   ├── __init__.py
+│   └── main.py          # 入口代码
+├── requirements.txt     # Python 依赖
+├── config_schema.json   # 配置项 Schema (JSON Schema)
+├── assets/              # 图标、本地化文件
+└── tests/               # 单元测试
+```
+
+### 3.2 `plugin.yaml` 元数据示例
+
+```yaml
+name: weather_expert
+version: 1.2.0
+description: 天气查询专家插件
+author: "Author Name"
+license: MIT
+
+# 扩展点声明
+extensions:
+  - type: tool
+    entry: src.main:query_weather
+  - type: event_listener
+    events: ["user.connected"]
+
+# 权限声明
+permissions:
+  - network.outbound: "https://api.weather.com/*"
+  - memory.read: true
+
+# 依赖
+requires:
+  python: ">=3.11"
+  packages:
+    - requests>=2.28
+```
+
+---
+
+## 4. 安全模型
+
+### 4.1 权限分级 (Permission Levels)
+
+| 级别 | 权限标识 | 说明 |
+|------|----------|------|
+| **L0** | `compute` | 仅允许计算，无外部访问 |
+| **L1** | `memory.read`, `config.read` | 只读访问系统数据 |
+| **L2** | `network.outbound` | 允许发起受限网络请求 |
+| **L3** | `fs.read`, `fs.write` | 限制在插件沙箱目录内读写 |
+| **L4** | `memory.write`, `output.send` | 允许修改系统状态 |
+
+### 4.2 沙箱实现要求
+
+- **网络隔离**：默认禁止外网，仅允许白名单域名。
+- **文件系统**：限制 `open` 等操作只能在插件专属目录 (`data/plugins/<id>/`)。
+- **危险函数**：拦截 `os.system`, `subprocess`, `eval`, `exec` 等。
+- **资源限制**：限制 CPU 使用率、内存上限 (如 256MB)、运行时间 (超时熔断)。
+
+---
+
+## 5. 扩展点与 API
+
+### 5.1 扩展点类型
+
+插件可以通过 `plugin.yaml` 声明以下扩展点：
+
+1. **Tool Extension (工具)**: 注册 Function Calling 工具供 AI 调用。
+2. **Middleware Extension (中间件)**: 拦截/修改输入输出流。
+3. **Event Listener (事件监听)**: 监听系统事件 (如 `user.message`, `memory.saved`)。
+4. **Memory Provider (记忆扩展)**: 提供自定义记忆存储逻辑。
+
+### 5.2 插件 API 网关
+
+插件通过注入的 `PluginAPI` 与主系统交互，**禁止**直接访问主系统模块。
+
+```python
+# 插件代码示例
+class WeatherPlugin(PluginBase):
+    def on_tool_call(self, tool_name: str, args: dict):
+        # 通过 API 网关安全调用
+        return self.api.memory.retrieve(f"weather_{args['city']}")
+```
+
+---
+
+## 6. 开发工作流
+
+1. **开发**: 编写插件代码，配置 `plugin.yaml`。
+2. **打包**: 使用 CLI 工具打包 `plugin build`。
+   ```bash
+   plugin-cli build --output weather_expert.zip
+   ```
+3. **签名**: 对包进行签名 `plugin sign`。
+4. **安装**: 安装到 AGI 系统 `plugin install weather_expert.zip`。
+5. **授权**: 用户在 UI 确认权限后激活。
+
+---
+
+## 7. 交付物清单
+
+### 7.1 核心代码
+- 替换 `modules/plugin_system/` 下的所有文件。
+- 实现 `Loader`, `Sandbox`, `EventBus`, `Gateway` 核心组件。
+
+### 7.2 CLI 工具
+- 提供 `plugin-cli` 命令行工具，支持 `build`, `sign`, `install` 等操作。
+
+### 7.3 示例插件
+- 提供 3 个示例插件：
+  1. **Hello World** (L0 权限，进程内运行)
+  2. **Network Caller** (L2 权限，子进程运行)
+  3. **File Writer** (L3 权限，沙箱隔离测试)
+
+### 7.4 测试与安全验证
+- 完整的单元测试与集成测试。
+- **逃逸测试用例**: 证明插件无法通过 `import os` 等手段破坏主系统。
+
+---
+
+## 8. 技术栈要求
+
+| 组件 | 推荐方案 | 备注 |
+|------|----------|------|
+| **进程通信** | `multiprocessing.Pipe` + JSON | 低延迟 |
+| **依赖隔离** | `uv` 或 `venv` | 快速构建虚拟环境 |
+| **配置管理** | `pydantic` | 强类型校验 |
+| **元数据** | `pyyaml` | 解析 `plugin.yaml` |
+| **安全沙箱** | `seccomp` / `sandbox-exec` / `AppArmor` | 根据 OS 选择 |
+
+---
+
+> **注意**: 本文档为初步架构说明，具体实现细节可由开发团队补充，但**安全隔离**与**标准规范**为不可妥协的核心要求。

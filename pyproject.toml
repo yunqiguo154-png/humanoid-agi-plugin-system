@@ -1,0 +1,88 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "humanoid-agi"
+version = "0.1.0"
+description = "Humanoid AGI plugin system with sandbox, gateway, registry, signing, audit, and governance controls."
+readme = { file = "SPECIFICATION", content-type = "text/markdown" }
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+authors = [
+  { name = "Humanoid AGI Team" }
+]
+dependencies = [
+  "cryptography>=42",
+  "pydantic>=2.6",
+  "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "coverage[toml]>=7.4",
+  "mypy>=1.8",
+  "ruff>=0.4",
+]
+
+[project.scripts]
+plugin-cli = "cli:main"
+
+[tool.setuptools]
+py-modules = ["cli"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["modules*"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+exclude = [
+  ".git",
+  ".venv",
+  "__pycache__",
+  "data",
+]
+
+[tool.ruff.lint]
+select = ["E9", "F63", "F7", "F82"]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["modules/plugin_system", "cli.py"]
+explicit_package_bases = true
+exclude = [
+  "^data/",
+  "^tests/",
+  "^examples/",
+]
+ignore_missing_imports = true
+follow_imports = "silent"
+warn_return_any = false
+warn_unused_configs = true
+check_untyped_defs = false
+allow_redefinition = true
+disable_error_code = [
+  "assignment",
+  "attr-defined",
+  "call-arg",
+  "import-untyped",
+  "misc",
+  "operator",
+  "union-attr",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["modules"]
+omit = [
+  "tests/*",
+  "data/*",
+  "examples/*",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+fail_under = 70
