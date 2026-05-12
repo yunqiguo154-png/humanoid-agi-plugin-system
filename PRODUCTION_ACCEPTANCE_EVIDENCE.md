@@ -7,7 +7,7 @@ This file records the current local RC evidence status. Do not treat missing or 
 | Item | Evidence |
 |------|----------|
 | CI run URL | Missing. `gh` CLI was unavailable; see `evidence/ci_result.json`. |
-| Commit SHA | `6ccee043e61859e310efe454737ac92c399c26af` local RC commit. |
+| Commit SHA | See `evidence/environment.json` generated after the final local RC commit, and verify with `git rev-parse HEAD`. The evidence JSON is intentionally ignored by Git because it is machine-specific. |
 | Branch | `main`. |
 | Working tree status | Clean after the local RC commit. Evidence JSON files are local artifacts and are ignored by Git. |
 | Release candidate tag | `v0.9.0-rc1` candidate only, not GA. |
