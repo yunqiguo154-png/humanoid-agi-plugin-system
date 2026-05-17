@@ -7,24 +7,24 @@ This file records the current local RC evidence status. Do not treat missing or 
 | Item | Evidence |
 |------|----------|
 | GitHub remote | `https://github.com/yunqiguo154-png/humanoid-agi-plugin-system.git`. |
-| GitHub push | `main`, `v0.9.0-rc1`, and `v0.9.0-rc2` were pushed to `origin`. |
-| Current pushed HEAD | `23cdbe9ca2f4b9781422955be1b27fe2a5488713` (`Diagnose and fix production bwrap validation worker execution`). |
-| Recommended validation tag | Create `v0.9.0-rc3` from current `main` before final archive. `v0.9.0-rc2` does not include the bwrap diagnostics patch. |
+| GitHub push | `main`, `v0.9.0-rc1`, `v0.9.0-rc2`, and `v0.9.0-rc3` were pushed to `origin`. |
+| Current pushed HEAD | `b3cddd17ae5f3e51ed40878ae60761ef43e54a63` (`Record target Linux bwrap validation evidence status`). |
+| Current validation tag | `v0.9.0-rc3` points to `b3cddd17ae5f3e51ed40878ae60761ef43e54a63`. |
 | Historical RC tag | `v0.9.0-rc1` remains the local RC freeze point and was not moved. |
 | Post-RC2 note | This document revision adds bwrap worker diagnostics, bwrap-internal preflight, local audit evidence helper instructions, and separates GitHub-hosted bwrap diagnostic from target production validation after `v0.9.0-rc2`; do not move the tag. Create `v0.9.0-rc3` if these changes should be part of a tagged validation run. |
-| GitHub Actions | Stale for current HEAD. The archived run passed for an older commit and must not be treated as current HEAD CI evidence. |
-| CI run URL | `https://github.com/yunqiguo154-png/humanoid-agi-plugin-system/actions/runs/25985684158` for stale head `36e4fcd51209a05f6ca5902c53970ab4edebf601`. |
-| GitHub Actions run URL | `https://github.com/yunqiguo154-png/humanoid-agi-plugin-system/actions/runs/25985684158` for stale head `36e4fcd51209a05f6ca5902c53970ab4edebf601`. |
-| CI matrix | Stale. The recorded run passed ubuntu-latest Python 3.11 / 3.12 / 3.13 and windows-latest Python 3.11 / 3.12 / 3.13 for the older CI evidence head. |
-| CI quality checks | Stale. The recorded run passed unittest, ruff, mypy, and coverage for the older CI evidence head. |
-| Coverage | 71% in stale CI evidence. |
-| CI evidence head SHA | `36e4fcd51209a05f6ca5902c53970ab4edebf601`; current HEAD is `7b0aa53773aef957a98c610967a5469cec962848`. |
-| Commit SHA | `23cdbe9ca2f4b9781422955be1b27fe2a5488713` for the bwrap diagnostics and VM evidence documentation update. |
+| GitHub Actions | Pass for `v0.9.0-rc3`. |
+| CI run URL | `https://github.com/yunqiguo154-png/humanoid-agi-plugin-system/actions/runs/25993374466`. |
+| GitHub Actions run URL | `https://github.com/yunqiguo154-png/humanoid-agi-plugin-system/actions/runs/25993374466`. |
+| CI matrix | Pass for ubuntu-latest Python 3.11 / 3.12 / 3.13 and windows-latest Python 3.11 / 3.12 / 3.13. |
+| CI quality checks | Pass for unittest, ruff, mypy, and coverage. |
+| Coverage | 71% in rc3 CI evidence. |
+| CI evidence head SHA | `b3cddd17ae5f3e51ed40878ae60761ef43e54a63`. |
+| Commit SHA | `b3cddd17ae5f3e51ed40878ae60761ef43e54a63` for the rc3 evidence alignment point. |
 | Branch | `main`. |
 | Working tree status | Clean at local evidence review. Evidence JSON files are local artifacts and are ignored by Git. |
-| Release candidate tag | `v0.9.0-rc2` candidate only, not GA. |
+| Release candidate tag | `v0.9.0-rc3` candidate only, not GA. |
 | Approver | Missing. No risk acceptance or release approval was provided. |
-| final go/no-go decision | NO_GO. Target Linux+bwrap passed, but current-head CI, real scanner evidence, and external audit anchor or accepted risk are still missing; see `evidence_vm/release_gate.json` in the local evidence archive. |
+| final go/no-go decision | NO_GO. Target Linux+bwrap and rc3 CI passed, but real scanner evidence and external audit anchor or accepted risk are still missing; see `evidence_vm/release_gate.json` in the local evidence archive. |
 | Decision timestamp | See `generated_at` in `evidence/release_gate.json`. |
 
 ## Host Evidence
@@ -94,9 +94,9 @@ Verified evidence highlights:
 | `preflight.python_version` | Python 3.11.15 |
 | Critical checks | `plugin_executed`, bwrap wrapper/network/tmp, host HOME, `.env`, core block, code readonly, private tmp, host tmp, direct network, data write, and audit records all `pass` |
 
-Because this VM was manually patched by `scp` while its Git checkout still reported old HEAD
-`168887e666167617abffc89295dab80446ea9fba`, final archive should create `v0.9.0-rc3` at current `main`, update the VM
-to that commit, and rerun the same command so the evidence SHA and tag align.
+The target Linux VM production-required evidence copied to `evidence_vm/bwrap_validation.json` is the production
+bwrap validation evidence for rc3 review. GitHub-hosted bwrap diagnostic artifacts remain troubleshooting-only and do
+not clear production `bwrap.validation`.
 
 GitHub-hosted diagnostic command and artifact:
 
@@ -117,7 +117,7 @@ acceptance evidence should use the explicit command below.
 ```bash
 git clone https://github.com/yunqiguo154-png/humanoid-agi-plugin-system.git
 cd humanoid-agi-plugin-system
-git checkout v0.9.0-rc2
+git checkout v0.9.0-rc3
 git rev-parse HEAD
 git branch --show-current
 python3 --version
@@ -232,7 +232,7 @@ List accepted risks from `RISK_REGISTER.md`, including owner and expiry/review d
 | --- | --- |
 | `evidence/environment.json` | warn because this is a Windows workstation, not target Linux+bwrap production evidence. |
 | `evidence/local_quality_gate.json` | pass locally: unittest, ruff, mypy, coverage 71%. |
-| `evidence/ci_result.json` | stale for current HEAD. The recorded run passed older head `36e4fcd51209a05f6ca5902c53970ab4edebf601`; current HEAD was `7b0aa53773aef957a98c610967a5469cec962848` before this documentation/tooling update. |
+| `evidence/ci_result.json` | pass for rc3 head `b3cddd17ae5f3e51ed40878ae60761ef43e54a63`; GitHub Actions run `25993374466`. |
 | `evidence/doctor.json` | fail, production_blocking. |
 | `evidence/bwrap_diagnostic_github_hosted.json` | fail / unsupported_environment diagnostic only; production_blocking and not Release Gate pass evidence. |
 | `evidence/bwrap_validation.json` | Target Linux VM production-required validation passed in copied local archive `evidence_vm/bwrap_validation.json`; rerun on an aligned `v0.9.0-rc3` checkout for final archive. |
@@ -243,9 +243,10 @@ List accepted risks from `RISK_REGISTER.md`, including owner and expiry/review d
 | `evidence/revocation_drill.json` | pass in copied VM archive: revocation drill passed. |
 | `evidence/quarantine_drill.json` | pass in copied VM archive: quarantine drill passed. |
 | `evidence/rollback_drill.json` | pass in copied VM archive: rollback drill passed. |
-| `evidence/release_gate.json` | NO_GO in copied VM archive. Remaining production blockers: `ci.matrix`, `scanner.configured`, `doctor.production_blocking`, `audit.verify`, `scanner.policy`. |
+| `evidence/release_gate.json` | NO_GO in copied VM archive. After rc3 CI alignment and Release Gate classification fixes, expected remaining blockers are real scanner evidence and external audit anchor / controlled risk. |
 
 Windows workstation evidence cannot replace target Linux+bwrap evidence. Local hash chains and local checkpoints cannot
 replace an external append-only/SIEM/WORM audit anchor. Offline scanner fixture output cannot replace real vulnerability
 intelligence. GitHub-hosted bwrap diagnostic cannot replace target production Linux host validation. The release remains
-not GA. Create `v0.9.0-rc3` from current `main` before the final aligned validation archive.
+not GA. If tracked Release Gate or scanner evidence tooling changes are committed after `v0.9.0-rc3`, create a new
+`v0.9.0-rc4` tag for the next aligned validation archive rather than moving rc3.

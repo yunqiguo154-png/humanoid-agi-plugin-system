@@ -54,6 +54,8 @@ files = ["modules/plugin_system", "cli.py"]
 explicit_package_bases = true
 exclude = [
   "^data/",
+  "^evidence/",
+  "^evidence_vm/",
   "^tests/",
   "^examples/",
 ]

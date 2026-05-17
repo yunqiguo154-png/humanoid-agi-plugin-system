@@ -14,6 +14,7 @@ from scripts.drill_registry_verify import run_drill as run_registry_drill
 from scripts.drill_revocation import run_drill as run_revocation_drill
 from scripts.drill_rollback import run_drill as run_rollback_drill
 from scripts.generate_audit_verify_evidence import generate_evidence, verify_local_audit_pair
+from scripts.create_scan_report_from_pip_audit import convert_pip_audit_report, load_pip_audit_report, malformed_report
 from tests.test_utils import make_test_root
 
 
@@ -73,8 +74,8 @@ class RcEvidenceToolTests(unittest.TestCase):
                 ci={"status": "pass"},
                 doctor={"status": "pass", "production_blocking": False, "checks": []},
                 bwrap=self._production_bwrap_payload(),
-                audit={"status": "pass", "checkpoint": {"status": "success"}},
-                scan={"policy_decision": "pass"},
+                audit=self._audit_payload(),
+                scan=self._scan_payload(),
                 registry={"status": "pass"},
                 revocation={"status": "pass"},
                 quarantine=None,
@@ -92,8 +93,8 @@ class RcEvidenceToolTests(unittest.TestCase):
                 ci={"status": "pass"},
                 doctor={"status": "pass", "production_blocking": False, "checks": []},
                 bwrap=self._production_bwrap_payload(),
-                audit={"status": "pass", "checkpoint": {"status": "success"}},
-                scan={"policy_decision": "pass"},
+                audit=self._audit_payload(),
+                scan=self._scan_payload(),
                 registry={"status": "pass"},
                 revocation={"status": "pass"},
                 quarantine={"status": "pass"},
@@ -138,6 +139,51 @@ class RcEvidenceToolTests(unittest.TestCase):
         self.assertFalse(tampered["checkpoint_verified"])
         self.assertIn("hash", str(tampered["error"]))
 
+    def test_pip_audit_empty_vulnerability_report_passes(self) -> None:
+        report = convert_pip_audit_report({"dependencies": [{"name": "safe", "version": "1", "vulns": []}]}, input_file="raw.json")
+
+        self.assertEqual(report["scanner_name"], "pip-audit")
+        self.assertEqual(report["source"], "real_scanner")
+        self.assertTrue(report["production_evidence"])
+        self.assertEqual(report["policy_decision"], "pass")
+        self.assertEqual(report["findings"], [])
+
+    def test_pip_audit_vulnerability_report_fails(self) -> None:
+        report = convert_pip_audit_report(
+            {
+                "dependencies": [
+                    {
+                        "name": "bad",
+                        "version": "1",
+                        "vulns": [
+                            {
+                                "id": "PYSEC-1",
+                                "severity": "HIGH",
+                                "description": "bad package",
+                                "fix_versions": ["2"],
+                            }
+                        ],
+                    }
+                ]
+            },
+            input_file="raw.json",
+        )
+
+        self.assertEqual(report["policy_decision"], "fail")
+        self.assertEqual(report["severity_summary"]["high"], 1)
+        self.assertEqual(report["findings"][0]["id"], "PYSEC-1")
+
+    def test_pip_audit_malformed_json_fails_closed(self) -> None:
+        path = self.root / "pip_audit_raw.json"
+        path.write_text("[]", encoding="utf-8")
+
+        with self.assertRaises(ValueError):
+            load_pip_audit_report(path)
+
+        report = malformed_report(input_file=path, error="bad json")
+        self.assertEqual(report["policy_decision"], "fail")
+        self.assertFalse(report["production_evidence"])
+
     def _assert_drill_schema(self, payload: dict[str, object], drill_id: str) -> None:
         required = {
             "drill_id",
@@ -162,6 +208,26 @@ class RcEvidenceToolTests(unittest.TestCase):
             "production_blocking": False,
             "reason": f"fake {evidence_id}",
             "generated_at": "2026-05-12T00:00:00+00:00",
+        }
+
+    def _audit_payload(self) -> dict[str, object]:
+        return {
+            "status": "pass",
+            "hash_chain_verified": True,
+            "checkpoint_verified": True,
+            "external_anchor_configured": True,
+            "production_immutability": True,
+            "checkpoint": {"status": "success"},
+        }
+
+    def _scan_payload(self) -> dict[str, object]:
+        return {
+            "scanner_name": "pip-audit",
+            "scanner_version": "2.9.0",
+            "source": "real_scanner",
+            "production_evidence": True,
+            "policy_decision": "pass",
+            "status": "pass",
         }
 
     def _production_bwrap_payload(self) -> dict[str, object]:

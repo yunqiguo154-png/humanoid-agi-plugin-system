@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import argparse
 import json
@@ -27,8 +27,8 @@ class ReleaseGateTests(unittest.TestCase):
                 ci={"status": "pass"},
                 doctor={"status": "pass", "production_blocking": False, "checks": [{"check_id": "doctor", "status": "pass"}]},
                 bwrap=self._production_bwrap_payload(),
-                audit={"status": "pass", "checkpoint": {"status": "success"}},
-                scan={"policy_decision": "pass"},
+                audit=self._audit_payload(),
+                scan=self._scan_payload(),
                 registry={"status": "pass"},
                 revocation={"status": "pass"},
                 quarantine={"status": "pass"},
@@ -43,7 +43,7 @@ class ReleaseGateTests(unittest.TestCase):
                 ci={"status": "pass"},
                 doctor={"status": "pass", "production_blocking": False, "checks": [{"check_id": "doctor", "status": "pass"}]},
                 bwrap=self._production_bwrap_payload(),
-                audit={"status": "pass", "checkpoint": {"status": "success"}},
+                audit=self._audit_payload(),
                 scan=None,
                 registry={"status": "pass"},
                 revocation={"status": "pass"},
@@ -60,8 +60,8 @@ class ReleaseGateTests(unittest.TestCase):
                 ci={"status": "pass"},
                 doctor={"status": "pass", "production_blocking": False, "checks": [{"check_id": "doctor", "status": "pass"}]},
                 bwrap={"status": "fail", "reason": "bubblewrap unavailable"},
-                audit={"status": "pass", "checkpoint": {"status": "success"}},
-                scan={"policy_decision": "pass"},
+                audit=self._audit_payload(),
+                scan=self._scan_payload(),
                 registry={"status": "pass"},
                 revocation={"status": "pass"},
                 quarantine={"status": "pass"},
@@ -76,8 +76,8 @@ class ReleaseGateTests(unittest.TestCase):
                 ci={"status": "pass"},
                 doctor={"status": "pass", "production_blocking": False, "checks": [{"check_id": "doctor", "status": "pass"}]},
                 bwrap={"mode": "diagnostic", "environment_class": "github_hosted", "status": "fail"},
-                audit={"status": "pass", "checkpoint": {"status": "success"}},
-                scan={"policy_decision": "pass"},
+                audit=self._audit_payload(),
+                scan=self._scan_payload(),
                 registry={"status": "pass"},
                 revocation={"status": "pass"},
                 quarantine={"status": "pass"},
@@ -94,8 +94,8 @@ class ReleaseGateTests(unittest.TestCase):
                 ci={"status": "pass"},
                 doctor={"status": "pass", "production_blocking": False, "checks": [{"check_id": "doctor", "status": "pass"}]},
                 bwrap={"mode": "diagnostic", "environment_class": "github_hosted", "status": "unsupported_environment"},
-                audit={"status": "pass", "checkpoint": {"status": "success"}},
-                scan={"policy_decision": "pass"},
+                audit=self._audit_payload(),
+                scan=self._scan_payload(),
                 registry={"status": "pass"},
                 revocation={"status": "pass"},
                 quarantine={"status": "pass"},
@@ -110,8 +110,8 @@ class ReleaseGateTests(unittest.TestCase):
                 ci={"status": "pass"},
                 doctor={"status": "pass", "production_blocking": False, "checks": [{"check_id": "doctor", "status": "pass"}]},
                 bwrap=self._production_bwrap_payload(status="pass", mode="diagnostic", environment_class="self_hosted"),
-                audit={"status": "pass", "checkpoint": {"status": "success"}},
-                scan={"policy_decision": "pass"},
+                audit=self._audit_payload(),
+                scan=self._scan_payload(),
                 registry={"status": "pass"},
                 revocation={"status": "pass"},
                 quarantine={"status": "pass"},
@@ -126,8 +126,8 @@ class ReleaseGateTests(unittest.TestCase):
                 ci={"status": "pass"},
                 doctor={"status": "pass", "production_blocking": False, "checks": [{"check_id": "doctor", "status": "pass"}]},
                 bwrap=self._production_bwrap_payload(),
-                audit={"status": "pass", "checkpoint": {"status": "success"}},
-                scan={"policy_decision": "pass"},
+                audit=self._audit_payload(),
+                scan=self._scan_payload(),
                 registry={"status": "pass"},
                 revocation={"status": "pass"},
                 quarantine={"status": "pass"},
@@ -144,8 +144,8 @@ class ReleaseGateTests(unittest.TestCase):
                 ci={"status": "pass"},
                 doctor={"status": "pass", "production_blocking": False, "checks": [{"check_id": "doctor", "status": "pass"}]},
                 bwrap=payload,
-                audit={"status": "pass", "checkpoint": {"status": "success"}},
-                scan={"policy_decision": "pass"},
+                audit=self._audit_payload(),
+                scan=self._scan_payload(),
                 registry={"status": "pass"},
                 revocation={"status": "pass"},
                 quarantine={"status": "pass"},
@@ -168,8 +168,8 @@ class ReleaseGateTests(unittest.TestCase):
                 ci={"status": "pass"},
                 doctor={"status": "pass", "production_blocking": False, "checks": [{"check_id": "doctor", "status": "pass"}]},
                 bwrap=payload,
-                audit={"status": "pass", "checkpoint": {"status": "success"}},
-                scan={"policy_decision": "pass"},
+                audit=self._audit_payload(),
+                scan=self._scan_payload(),
                 registry={"status": "pass"},
                 revocation={"status": "pass"},
                 quarantine={"status": "pass"},
@@ -190,8 +190,8 @@ class ReleaseGateTests(unittest.TestCase):
                 ci={"status": "pass"},
                 doctor={"status": "pass", "production_blocking": False, "checks": [{"check_id": "doctor", "status": "pass"}]},
                 bwrap=payload,
-                audit={"status": "pass", "checkpoint": {"status": "success"}},
-                scan={"policy_decision": "pass"},
+                audit=self._audit_payload(),
+                scan=self._scan_payload(),
                 registry={"status": "pass"},
                 revocation={"status": "pass"},
                 quarantine={"status": "pass"},
@@ -209,7 +209,7 @@ class ReleaseGateTests(unittest.TestCase):
                 doctor={"status": "pass", "production_blocking": False, "checks": [{"check_id": "doctor", "status": "pass"}]},
                 bwrap=self._production_bwrap_payload(),
                 audit={"status": "pass", "checkpoint": {"status": "fail"}},
-                scan={"policy_decision": "pass"},
+                scan=self._scan_payload(),
                 registry={"status": "pass"},
                 revocation={"status": "pass"},
                 quarantine={"status": "pass"},
@@ -224,8 +224,8 @@ class ReleaseGateTests(unittest.TestCase):
                 ci=None,
                 doctor={"status": "pass", "production_blocking": False, "checks": [{"check_id": "doctor", "status": "pass"}]},
                 bwrap=self._production_bwrap_payload(),
-                audit={"status": "pass", "checkpoint": {"status": "success"}},
-                scan={"policy_decision": "pass"},
+                audit=self._audit_payload(),
+                scan=self._scan_payload(),
                 registry={"status": "pass"},
                 revocation={"status": "pass"},
                 quarantine={"status": "pass"},
@@ -253,8 +253,8 @@ class ReleaseGateTests(unittest.TestCase):
                 },
                 doctor={"status": "pass", "production_blocking": False, "checks": [{"check_id": "doctor", "status": "pass"}]},
                 bwrap=self._production_bwrap_payload(),
-                audit={"status": "pass", "checkpoint": {"status": "success"}},
-                scan={"policy_decision": "pass"},
+                audit=self._audit_payload(),
+                scan=self._scan_payload(),
                 registry={"status": "pass"},
                 revocation={"status": "pass"},
                 quarantine={"status": "pass"},
@@ -282,8 +282,8 @@ class ReleaseGateTests(unittest.TestCase):
                 },
                 doctor={"status": "pass", "production_blocking": False, "checks": [{"check_id": "doctor", "status": "pass"}]},
                 bwrap=self._production_bwrap_payload(),
-                audit={"status": "pass", "checkpoint": {"status": "success"}},
-                scan={"policy_decision": "pass"},
+                audit=self._audit_payload(),
+                scan=self._scan_payload(),
                 registry={"status": "pass"},
                 revocation={"status": "pass"},
                 quarantine={"status": "pass"},
@@ -309,8 +309,8 @@ class ReleaseGateTests(unittest.TestCase):
                     ],
                 },
                 bwrap=self._production_bwrap_payload(),
-                audit={"status": "pass", "checkpoint": {"status": "success"}},
-                scan={"policy_decision": "pass"},
+                audit=self._audit_payload(),
+                scan=self._scan_payload(),
                 registry={"status": "pass"},
                 revocation={"status": "pass"},
                 quarantine={"status": "pass"},
@@ -323,8 +323,8 @@ class ReleaseGateTests(unittest.TestCase):
         ci = self._write_json("ci.json", {"status": "pass"})
         doctor = self._write_json("doctor.json", {"status": "pass", "production_blocking": False, "checks": []})
         bwrap = self._write_json("bwrap.json", self._production_bwrap_payload())
-        audit = self._write_json("audit.json", {"status": "pass", "checkpoint": {"status": "success"}})
-        scan = self._write_json("scan.json", {"policy_decision": "pass"})
+        audit = self._write_json("audit.json", self._audit_payload())
+        scan = self._write_json("scan.json", self._scan_payload())
         registry = self._write_json("registry.json", {"status": "pass"})
         revocation = self._write_json("revocation.json", {"status": "pass"})
         quarantine = self._write_json("quarantine.json", {"status": "pass"})
@@ -360,6 +360,154 @@ class ReleaseGateTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout)["decision"], GO)
+
+    def test_local_audit_verify_without_external_anchor_has_specific_blocker(self) -> None:
+        result = evaluate_release_gate(
+            GateInput(
+                ci={"status": "pass"},
+                doctor={"status": "pass", "production_blocking": False, "checks": []},
+                bwrap=self._production_bwrap_payload(),
+                audit=self._audit_payload(external_anchor=False),
+                scan=self._scan_payload(),
+                registry={"status": "pass"},
+                revocation={"status": "pass"},
+                quarantine={"status": "pass"},
+                rollback={"status": "pass"},
+            )
+        )
+        blocking = {item.check_id for item in result.findings if item.production_blocking}
+        self.assertNotIn("audit.verify", blocking)
+        self.assertIn("audit.external_anchor_missing", blocking)
+        self.assertEqual(result.decision, NO_GO)
+
+    def test_audit_external_anchor_missing_with_accepted_risk_is_controlled_go(self) -> None:
+        result = evaluate_release_gate(
+            GateInput(
+                ci={"status": "pass"},
+                doctor={"status": "pass", "production_blocking": False, "checks": []},
+                bwrap=self._production_bwrap_payload(),
+                audit=self._audit_payload(external_anchor=False),
+                scan=self._scan_payload(),
+                registry={"status": "pass"},
+                revocation={"status": "pass"},
+                quarantine={"status": "pass"},
+                rollback={"status": "pass"},
+                risk_acceptance={"accepted": True, "accepted_risks": ["AUDIT-ANCHOR"]},
+            )
+        )
+        findings = {item.check_id: item for item in result.findings}
+        self.assertFalse(findings["audit.external_anchor_missing"].production_blocking)
+        self.assertEqual(result.decision, CONTROLLED_GO)
+
+    def test_doctor_scanner_missing_is_not_counted_twice(self) -> None:
+        result = evaluate_release_gate(
+            GateInput(
+                ci={"status": "pass"},
+                doctor={
+                    "status": "fail",
+                    "production_blocking": True,
+                    "checks": [
+                        {
+                            "check_id": "scanner.configured",
+                            "status": "fail",
+                            "reason": "scanner missing",
+                            "production_blocking": True,
+                        }
+                    ],
+                },
+                bwrap=self._production_bwrap_payload(),
+                audit=self._audit_payload(),
+                scan=None,
+                registry={"status": "pass"},
+                revocation={"status": "pass"},
+                quarantine={"status": "pass"},
+                rollback={"status": "pass"},
+            )
+        )
+        blocking = [item.check_id for item in result.findings if item.production_blocking]
+        self.assertIn("scanner.configured", blocking)
+        self.assertIn("scanner.policy", blocking)
+        self.assertNotIn("doctor.production_blocking", blocking)
+
+    def test_doctor_audit_anchor_missing_is_not_counted_twice(self) -> None:
+        result = evaluate_release_gate(
+            GateInput(
+                ci={"status": "pass"},
+                doctor={
+                    "status": "fail",
+                    "production_blocking": True,
+                    "checks": [
+                        {
+                            "check_id": "audit.external_anchor",
+                            "status": "fail",
+                            "reason": "anchor missing",
+                            "production_blocking": True,
+                        }
+                    ],
+                },
+                bwrap=self._production_bwrap_payload(),
+                audit=self._audit_payload(external_anchor=False),
+                scan=self._scan_payload(),
+                registry={"status": "pass"},
+                revocation={"status": "pass"},
+                quarantine={"status": "pass"},
+                rollback={"status": "pass"},
+            )
+        )
+        blocking = [item.check_id for item in result.findings if item.production_blocking]
+        self.assertIn("audit.external_anchor_missing", blocking)
+        self.assertNotIn("doctor.production_blocking", blocking)
+
+    def test_real_doctor_sandbox_fail_keeps_doctor_blocker(self) -> None:
+        result = evaluate_release_gate(
+            GateInput(
+                ci={"status": "pass"},
+                doctor={
+                    "status": "fail",
+                    "production_blocking": True,
+                    "checks": [
+                        {
+                            "check_id": "sandbox.windows.boundary",
+                            "status": "warn",
+                            "reason": "weak sandbox",
+                            "production_blocking": True,
+                        }
+                    ],
+                },
+                bwrap=self._production_bwrap_payload(),
+                audit=self._audit_payload(),
+                scan=self._scan_payload(),
+                registry={"status": "pass"},
+                revocation={"status": "pass"},
+                quarantine={"status": "pass"},
+                rollback={"status": "pass"},
+            )
+        )
+        blocking = {item.check_id for item in result.findings if item.production_blocking}
+        self.assertIn("doctor.production_blocking", blocking)
+
+    def test_offline_scanner_does_not_clear_production_blocker(self) -> None:
+        result = evaluate_release_gate(
+            GateInput(
+                ci={"status": "pass"},
+                doctor={"status": "pass", "production_blocking": False, "checks": []},
+                bwrap=self._production_bwrap_payload(),
+                audit=self._audit_payload(),
+                scan={
+                    "scanner_name": "OfflineVulnerabilityScanner/OfflineLicenseScanner adapter tests",
+                    "source": "reference_only",
+                    "status": "reference_only",
+                    "policy_decision": "not_production_evidence",
+                },
+                registry={"status": "pass"},
+                revocation={"status": "pass"},
+                quarantine={"status": "pass"},
+                rollback={"status": "pass"},
+            )
+        )
+        blocking = {item.check_id for item in result.findings if item.production_blocking}
+        self.assertIn("scanner.configured", blocking)
+        self.assertIn("scanner.policy", blocking)
 
     def test_acceptance_runner_marks_missing_evidence_not_ready(self) -> None:
         args = argparse.Namespace(
@@ -403,6 +551,26 @@ class ReleaseGateTests(unittest.TestCase):
         path = self.root / name
         path.write_text(json.dumps(payload), encoding="utf-8")
         return path
+
+    def _audit_payload(self, *, external_anchor: bool = True) -> dict[str, object]:
+        return {
+            "status": "pass" if external_anchor else "warn",
+            "hash_chain_verified": True,
+            "checkpoint_verified": True,
+            "external_anchor_configured": external_anchor,
+            "production_immutability": external_anchor,
+            "checkpoint": {"status": "success"},
+        }
+
+    def _scan_payload(self) -> dict[str, object]:
+        return {
+            "scanner_name": "pip-audit",
+            "scanner_version": "2.9.0",
+            "source": "real_scanner",
+            "production_evidence": True,
+            "policy_decision": "pass",
+            "status": "pass",
+        }
 
     def _production_bwrap_payload(
         self,
