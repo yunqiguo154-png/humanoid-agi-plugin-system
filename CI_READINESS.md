@@ -148,8 +148,14 @@ bwrap
 That job writes `evidence/bwrap_validation.json` with:
 
 ```bash
-python scripts/validate_bwrap_sandbox.py --mode production-required --json
+python scripts/validate_bwrap_sandbox.py --mode production-required --debug --keep-workdir --output evidence/bwrap_validation.json
 ```
 
 Only a `production-required` pass from a target Linux VM or self-hosted Linux+bwrap runner can clear the Release Gate
 `bwrap.validation` blocker. Diagnostic, skipped, unsupported, or GitHub-hosted bwrap evidence must remain blocking.
+
+When the backend probe succeeds but the validation worker fails to start or fails to return JSON, the evidence remains
+NO_GO. The JSON should include preflight and stdio diagnostics (`returncode`, `stdout_excerpt`, `stderr_excerpt`,
+`wrapped_command`, `import_probe`, `worker_started`, `json_result_received`) so the target host issue can be corrected
+without relaxing the sandbox policy. Release Gate keeps this as `bwrap.validation.worker_execution_failed` or
+`bwrap.validation.runtime_import_failed`.

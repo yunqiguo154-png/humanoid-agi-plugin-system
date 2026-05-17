@@ -154,6 +154,54 @@ class ReleaseGateTests(unittest.TestCase):
         )
         self.assertEqual(result.decision, NO_GO)
 
+    def test_enforced_bwrap_worker_empty_output_has_specific_blocker(self) -> None:
+        payload = self._production_bwrap_payload(status="fail")
+        payload["reason"] = "production-required bwrap validation did not pass"
+        payload["result"] = {
+            "status": "error",
+            "error_type": "WorkerNoOutput",
+            "worker_started": False,
+            "json_result_received": False,
+        }
+        result = evaluate_release_gate(
+            GateInput(
+                ci={"status": "pass"},
+                doctor={"status": "pass", "production_blocking": False, "checks": [{"check_id": "doctor", "status": "pass"}]},
+                bwrap=payload,
+                audit={"status": "pass", "checkpoint": {"status": "success"}},
+                scan={"policy_decision": "pass"},
+                registry={"status": "pass"},
+                revocation={"status": "pass"},
+                quarantine={"status": "pass"},
+                rollback={"status": "pass"},
+            )
+        )
+        blocking = {item.check_id for item in result.findings if item.production_blocking}
+        self.assertIn("bwrap.validation.worker_execution_failed", blocking)
+        self.assertEqual(result.decision, NO_GO)
+
+    def test_enforced_bwrap_preflight_import_fail_has_specific_blocker(self) -> None:
+        payload = self._production_bwrap_payload(status="fail")
+        payload["reason"] = "runtime import failed under bwrap"
+        payload["preflight"] = {"status": "fail", "import_runtime": "fail"}
+        payload["result"] = {"status": "not_run", "worker_started": False, "json_result_received": False}
+        result = evaluate_release_gate(
+            GateInput(
+                ci={"status": "pass"},
+                doctor={"status": "pass", "production_blocking": False, "checks": [{"check_id": "doctor", "status": "pass"}]},
+                bwrap=payload,
+                audit={"status": "pass", "checkpoint": {"status": "success"}},
+                scan={"policy_decision": "pass"},
+                registry={"status": "pass"},
+                revocation={"status": "pass"},
+                quarantine={"status": "pass"},
+                rollback={"status": "pass"},
+            )
+        )
+        blocking = {item.check_id for item in result.findings if item.production_blocking}
+        self.assertIn("bwrap.validation.runtime_import_failed", blocking)
+        self.assertEqual(result.decision, NO_GO)
+
     def test_audit_checkpoint_fail_is_no_go(self) -> None:
         result = evaluate_release_gate(
             GateInput(
@@ -387,6 +435,7 @@ class ReleaseGateTests(unittest.TestCase):
                     "env_blocked",
                     "core_blocked",
                     "code_readonly",
+                    "private_tmp_writable",
                     "host_tmp_not_leaked",
                     "direct_network_blocked",
                     "data_write_allowed",

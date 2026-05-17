@@ -46,6 +46,7 @@ from modules.plugin_system.sandbox_backend import (
     EXTERNAL_SANDBOX_ATTESTATION_ENV,
     BubblewrapBackend,
     _bubblewrap_probe_command,
+    _python_runtime_bind_paths,
     create_sandbox_backend,
 )
 from modules.plugin_system.signing import (
@@ -2503,7 +2504,17 @@ class PluginSystemTests(unittest.TestCase):
         self.assertEqual(backend.report.details["home"], str(plugin_dir / "data"))
         self.assertIn("_sandbox_runtime", backend.report.details["pythonpath"])
         self.assertIn(str(self.root / ".venv"), backend.report.details["runtime_python_binds"])
+        self.assertIn("wrapped_argv", backend.report.details)
+        self.assertEqual(backend.report.details["code_dir"], str(plugin_dir / "src"))
         self.assertNotIn(str(Path.cwd()), backend.report.details["readonly_binds"])
+
+    def test_python_runtime_bind_paths_prefer_venv_root(self) -> None:
+        venv_python = self.root / ".venv" / "bin" / "python"
+        venv_python.parent.mkdir(parents=True)
+        venv_python.write_text("", encoding="utf-8")
+        (self.root / ".venv" / "pyvenv.cfg").write_text("home = /usr/bin\n", encoding="utf-8")
+
+        self.assertEqual(_python_runtime_bind_paths(str(venv_python)), [self.root / ".venv"])
 
     def test_bubblewrap_probe_binds_system_runtime_paths(self) -> None:
         with patch(

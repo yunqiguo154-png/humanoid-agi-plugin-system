@@ -10,7 +10,7 @@ This file records the current local RC evidence status. Do not treat missing or 
 | GitHub push | `main`, `v0.9.0-rc1`, and `v0.9.0-rc2` were pushed to `origin`. |
 | Recommended validation tag | `v0.9.0-rc2`. |
 | Historical RC tag | `v0.9.0-rc1` remains the local RC freeze point and was not moved. |
-| Post-RC2 note | This document revision adds local audit evidence helper instructions and separates GitHub-hosted bwrap diagnostic from target production validation after `v0.9.0-rc2`; do not move the tag. Create `v0.9.0-rc3` if these changes should be part of a tagged validation run. |
+| Post-RC2 note | This document revision adds bwrap worker diagnostics, bwrap-internal preflight, local audit evidence helper instructions, and separates GitHub-hosted bwrap diagnostic from target production validation after `v0.9.0-rc2`; do not move the tag. Create `v0.9.0-rc3` if these changes should be part of a tagged validation run. |
 | GitHub Actions | Stale for current HEAD. The archived run passed for an older commit and must not be treated as current HEAD CI evidence. |
 | CI run URL | `https://github.com/yunqiguo154-png/humanoid-agi-plugin-system/actions/runs/25985684158` for stale head `36e4fcd51209a05f6ca5902c53970ab4edebf601`. |
 | GitHub Actions run URL | `https://github.com/yunqiguo154-png/humanoid-agi-plugin-system/actions/runs/25985684158` for stale head `36e4fcd51209a05f6ca5902c53970ab4edebf601`. |
@@ -34,7 +34,7 @@ This file records the current local RC evidence status. Do not treat missing or 
 | Kernel version | Missing for target Linux host. |
 | CPU architecture | AMD64 local workstation; see `evidence/environment.json`. |
 | Python version | Python 3.13.0 local workstation; see `evidence/environment.json`. |
-| `bwrap` version | Missing. Current host is not Linux; see `evidence/bwrap_validation.json`. |
+| `bwrap` version | Target VM reported bubblewrap 0.6.1 during manual testing; archive this in target evidence. |
 | Container / VM boundary, if any | Missing. |
 | External sandbox attestation, if used | Missing. |
 
@@ -72,9 +72,10 @@ The script does not generate CI URLs or fake environment results. Any skipped st
 
 Evidence path: `evidence/bwrap_validation.json`.
 
-Current result: target Linux+bwrap validation is Missing. Local Windows evidence is skipped. GitHub-hosted bwrap
-diagnostic failed or is unsupported because hosted runners can deny namespace or loopback operations required by
-bubblewrap. This is production-blocking for full third-party production approval.
+Current result: target Linux+bwrap production validation is still not passed. The target Linux VM has shown
+`sandbox_backend.enforced=true`, `probe.ok=true`, and required backend capabilities present, which means this is no
+longer the GitHub-hosted namespace limitation. The remaining failure is validation worker/runtime execution:
+the sample did not return valid JSON, so production validation remains fail-closed and production-blocking.
 
 GitHub-hosted diagnostic command and artifact:
 
@@ -111,7 +112,7 @@ python3 -m coverage run -m unittest discover -s tests
 python3 -m coverage report
 mkdir -p evidence
 plugin-cli doctor --production --json > evidence/doctor.json
-python3 scripts/validate_bwrap_sandbox.py --mode production-required --json > evidence/bwrap_validation.json
+python3 scripts/validate_bwrap_sandbox.py --mode production-required --debug --keep-workdir --output evidence/bwrap_validation.json
 python3 scripts/run_production_acceptance.py --json --output evidence/acceptance_result.json
 python3 scripts/generate_audit_verify_evidence.py --output evidence/audit_verify.json  # requires post-RC2 main or a later RC tag
 python3 scripts/release_gate.py --json > evidence/release_gate.json
@@ -130,6 +131,12 @@ replace validation on the target production Linux host class. A skipped, unsuppo
 validation is not a pass. Release Gate only clears `bwrap.validation` with `mode=production-required`,
 `environment_class=self_hosted` or target Linux evidence, `sandbox_backend.enforced=true`, required backend capabilities,
 and all critical sandbox checks passing.
+
+The production-required harness includes a bwrap-internal preflight and stdio worker diagnostics. A backend probe pass
+with worker failure is recorded as NO_GO with a specific blocker such as `bwrap.validation.worker_execution_failed` or
+`bwrap.validation.runtime_import_failed`. The JSON must include `preflight`, `returncode`, `stdout_excerpt`,
+`stderr_excerpt`, `wrapped_command`, `argv`, `cwd`, `executable`, `python_version`, `env_keys`, `import_probe`,
+`runtime_probe`, `worker_started`, and `json_result_received` when debugging a target VM failure.
 
 ## Audit Evidence
 
@@ -207,7 +214,7 @@ List accepted risks from `RISK_REGISTER.md`, including owner and expiry/review d
 | `evidence/ci_result.json` | stale for current HEAD. The recorded run passed older head `36e4fcd51209a05f6ca5902c53970ab4edebf601`; current HEAD was `7b0aa53773aef957a98c610967a5469cec962848` before this documentation/tooling update. |
 | `evidence/doctor.json` | fail, production_blocking. |
 | `evidence/bwrap_diagnostic_github_hosted.json` | fail / unsupported_environment diagnostic only; production_blocking and not Release Gate pass evidence. |
-| `evidence/bwrap_validation.json` | Missing for target Linux+bwrap production-required validation; production_blocking for full production. |
+| `evidence/bwrap_validation.json` | Target VM backend probe reached enforced=true, but worker/runtime validation did not pass; production_blocking for full production. |
 | `evidence/acceptance_result.json` | not_ready. |
 | `evidence/audit_verify.json` | warn: local hash chain and checkpoint verified, but external append-only/SIEM/WORM anchor is missing and controlled risk is required. |
 | `evidence/scanner_report.json` | missing, production_blocking. |

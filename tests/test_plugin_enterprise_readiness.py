@@ -31,7 +31,13 @@ from modules.plugin_system.scanner import (
 )
 from modules.plugin_system.signing import generate_keypair, sign_package, verify_signature
 from modules.plugin_system.sbom import write_sbom
-from scripts.validate_bwrap_sandbox import _evaluate_result, _make_malicious_plugin, run_validation
+from scripts.validate_bwrap_sandbox import (
+    _evaluate_result,
+    _make_malicious_plugin,
+    _preflight_failure_checks,
+    main as bwrap_validation_main,
+    run_validation,
+)
 from modules.plugin_system.loader import PluginLoader
 from modules.plugin_system.sandbox import scan_plugin_source
 from tests.test_utils import make_test_root
@@ -533,6 +539,76 @@ class EnterpriseReadinessTests(unittest.TestCase):
         statuses = {item["check_id"]: item["status"] for item in checks}
         self.assertEqual(statuses["bwrap_backend_enforced"], "fail")
         self.assertEqual(statuses["bwrap_wrapped_command"], "fail")
+
+    def test_bwrap_validation_worker_failure_keeps_backend_pass_context(self) -> None:
+        class EmptyAudit:
+            def read_records(self) -> list[object]:
+                return [{}]
+
+        checks = _evaluate_result(  # type: ignore[arg-type]
+            {"status": "error", "error_type": "WorkerNoOutput", "worker_started": False},
+            EmptyAudit(),
+            {
+                "sandbox_backend": {
+                    "enforced": True,
+                    "details": {"wrapped_command": True, "network": "unshared", "tmp": "private_tmpfs"},
+                }
+            },
+            {"host_tmp_leaked": False},
+        )
+        statuses = {item["check_id"]: item["status"] for item in checks}
+        self.assertEqual(statuses["bwrap_backend_enforced"], "pass")
+        self.assertEqual(statuses["bwrap_wrapped_command"], "pass")
+        self.assertEqual(statuses["plugin_executed"], "fail")
+        host_check = next(item for item in checks if item["check_id"] == "host_home_blocked")
+        self.assertEqual(host_check["runtime_observation"], "missing")
+
+    def test_bwrap_preflight_import_failure_checks_are_specific(self) -> None:
+        backend = {
+            "enforced": True,
+            "details": {},
+            "capabilities": {
+                "filesystem_isolation": True,
+                "network_isolation": True,
+                "process_containment": True,
+                "resource_limits": True,
+            },
+        }
+        checks = _preflight_failure_checks(
+            backend,
+            {
+                "import_runtime": "fail",
+                "tmp_writable": "pass",
+                "data_dir_writable": "pass",
+                "code_dir_readonly": "pass",
+                "host_home_blocked": "pass",
+                "env_blocked": "pass",
+                "core_blocked": "pass",
+                "wrapped_command": ["/usr/bin/bwrap", "--unshare-net", "--tmpfs", "/tmp", "--", sys.executable],
+            },
+        )
+        statuses = {item["check_id"]: item["status"] for item in checks}
+        self.assertEqual(statuses["bwrap_backend_enforced"], "pass")
+        self.assertEqual(statuses["bwrap_unshared_network"], "pass")
+        self.assertEqual(statuses["runtime_import"], "fail")
+
+    def test_bwrap_validation_output_argument_writes_json(self) -> None:
+        output = self.root / "evidence" / "bwrap.json"
+        with patch(
+            "scripts.validate_bwrap_sandbox.run_validation",
+            return_value={
+                "status": "fail",
+                "mode": "production-required",
+                "environment_class": "unknown",
+                "checks": [],
+                "reason": "test",
+            },
+        ):
+            exit_code = bwrap_validation_main(["--output", str(output)])
+
+        self.assertEqual(exit_code, 1)
+        payload = json.loads(output.read_text(encoding="utf-8"))
+        self.assertEqual(payload["status"], "fail")
 
     def test_rc1_docs_and_scripts_exist(self) -> None:
         expected = {

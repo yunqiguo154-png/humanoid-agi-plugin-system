@@ -40,6 +40,7 @@ Validate bubblewrap in one of two explicit modes:
 ```bash
 python scripts/validate_bwrap_sandbox.py --mode diagnostic --json
 python scripts/validate_bwrap_sandbox.py --mode production-required --json
+python scripts/validate_bwrap_sandbox.py --mode production-required --debug --keep-workdir --output evidence/bwrap_validation.json
 ```
 
 `diagnostic` is for GitHub-hosted runners or local troubleshooting. It records backend capabilities and may return
@@ -47,6 +48,15 @@ python scripts/validate_bwrap_sandbox.py --mode production-required --json
 is for a user-controlled Linux VM or a GitHub self-hosted runner labeled `self-hosted`, `linux`, `bwrap`. If the bwrap
 probe is not enforced in production-required mode, the script fails closed and does not run the validation sample plugin
 outside the sandbox.
+
+Production-required validation now runs a bwrap-internal preflight before the malicious validation sample. The preflight
+starts Python inside bwrap, imports the trusted runtime bundle, checks private `/tmp`, verifies plugin data is writable,
+verifies plugin code is read-only, and verifies host HOME, `.env`, and project core paths are not readable. If preflight
+or the stdio worker fails, the JSON includes `preflight`, `returncode`, `stdout_excerpt`, `stderr_excerpt`,
+`wrapped_command`, `argv`, `cwd`, `executable`, `python_version`, `env_keys`, `import_probe`, `runtime_probe`,
+`worker_started`, and `json_result_received`. A backend probe pass with worker failure is still production-blocking and
+is reported by Release Gate as `bwrap.validation.worker_execution_failed` or
+`bwrap.validation.runtime_import_failed`; it is not a pass.
 
 GitHub-hosted Ubuntu runners can fail bwrap probing with namespace or loopback errors such as
 `Failed RTM_NEWADDR: Operation not permitted`. That is a host capability limitation, not a reason to relax policy.
@@ -206,7 +216,7 @@ python3 -m coverage report
 
 mkdir -p evidence
 plugin-cli doctor --production --json > evidence/doctor.json
-python3 scripts/validate_bwrap_sandbox.py --mode production-required --json > evidence/bwrap_validation.json
+python3 scripts/validate_bwrap_sandbox.py --mode production-required --debug --keep-workdir --output evidence/bwrap_validation.json
 python3 scripts/run_production_acceptance.py --json --output evidence/acceptance_result.json
 python3 scripts/generate_audit_verify_evidence.py --output evidence/audit_verify.json  # requires post-RC2 main or a later RC tag
 python3 scripts/release_gate.py --json > evidence/release_gate.json

@@ -189,6 +189,7 @@ class RcEvidenceToolTests(unittest.TestCase):
                     "env_blocked",
                     "core_blocked",
                     "code_readonly",
+                    "private_tmp_writable",
                     "host_tmp_not_leaked",
                     "direct_network_blocked",
                     "data_write_allowed",

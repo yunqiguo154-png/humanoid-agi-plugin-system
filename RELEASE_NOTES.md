@@ -10,7 +10,7 @@ Do not mark this as `v1.0.0` GA until the external production acceptance items a
 
 - `v0.9.0-rc1`: local RC freeze point.
 - `v0.9.0-rc2`: CI evidence archival and external validation preparation point.
-- Post-RC2 `main` adds local audit verify evidence tooling and separates GitHub-hosted bwrap diagnostic from target production validation. Do not move `v0.9.0-rc2`; create a later RC tag if this tooling should be part of a tagged validation run.
+- Post-RC2 `main` adds bwrap worker diagnostics, bwrap-internal preflight, local audit verify evidence tooling, and separates GitHub-hosted bwrap diagnostic from target production validation. Do not move `v0.9.0-rc2`; create a later RC tag if this tooling should be part of a tagged validation run.
 - Current status remains RC, not GA.
 
 ## Current Capability
@@ -46,6 +46,7 @@ Plugin output remains untrusted tool result data and must be validated by downst
 - Registry support is signed distribution, not a full public marketplace.
 - Real bwrap behavior depends on target Linux kernel, namespace permissions, and deployment configuration.
 - GitHub-hosted Ubuntu bwrap diagnostics can fail because hosted runners restrict namespace or loopback operations; this is not production Linux+bwrap pass evidence.
+- A target VM may pass the bwrap backend probe but still fail worker/runtime validation. That remains NO_GO until the bwrap-internal preflight and validation sample return pass evidence.
 
 ## Upgrade Notes
 
@@ -72,6 +73,7 @@ from a later commit or tag that contains `scripts/generate_audit_verify_evidence
 - Production Doctor JSON.
 - `bwrap_validation.json` from `--mode production-required` on a target Linux VM or self-hosted Linux+bwrap runner.
 - Optional `bwrap_diagnostic_github_hosted.json` for hosted runner troubleshooting only.
+- Preflight and stdio worker diagnostics when target Linux+bwrap validation fails before producing sample JSON.
 - Scanner report from the approved scanner.
 - Audit checkpoint verification.
 - Registry, revocation, emergency quarantine, and rollback drill output.

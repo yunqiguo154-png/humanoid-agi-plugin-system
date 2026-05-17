@@ -39,7 +39,9 @@ class SandboxViolation(PermissionError):
 
 
 class SandboxStartupError(RuntimeError):
-    pass
+    def __init__(self, message: str, diagnostics: dict[str, Any] | None = None):
+        super().__init__(message)
+        self.diagnostics = diagnostics or {}
 
 
 class SandboxProtocolError(RuntimeError):
@@ -258,6 +260,51 @@ def _validate_optional_string_field(message: dict[str, Any], field: str) -> None
         raise SandboxProtocolError(f"IPC field {field} must be a string")
     if len(value) > MAX_IPC_STRING_FIELD_CHARS:
         raise SandboxProtocolError(f"IPC field {field} is too long")
+
+
+def _read_text_excerpt(path: Path | None, *, max_chars: int = 4096) -> str:
+    if path is None or not path.exists():
+        return ""
+    try:
+        handle = path.open("r", encoding="utf-8", errors="replace")
+        try:
+            handle.seek(0, os.SEEK_END)
+            size = handle.tell()
+            handle.seek(max(0, size - max_chars))
+            return handle.read(max_chars)
+        finally:
+            handle.close()
+    except Exception:
+        return ""
+
+
+def _classify_stdio_failure(exc: BaseException | None, stderr_excerpt: str) -> str | None:
+    if exc is None and not stderr_excerpt:
+        return None
+    lowered = stderr_excerpt.lower()
+    if isinstance(exc, subprocess.TimeoutExpired):
+        return "Timeout"
+    if isinstance(exc, PermissionError) or "permission denied" in lowered:
+        return "PermissionDenied"
+    if isinstance(exc, json.JSONDecodeError):
+        return "WorkerJsonDecodeError"
+    if isinstance(exc, SandboxProtocolError):
+        return "WorkerJsonDecodeError"
+    if isinstance(exc, queue.Empty):
+        if "modulenotfounderror" in lowered or "importerror" in lowered:
+            return "WorkerImportError"
+        if "bwrap:" in lowered or "bubblewrap" in lowered:
+            return "BwrapLaunchError"
+        if "no such file or directory" in lowered or "cannot open" in lowered:
+            return "RuntimeMountError"
+        return "WorkerNoOutput"
+    if "modulenotfounderror" in lowered or "importerror" in lowered:
+        return "WorkerImportError"
+    if "bwrap:" in lowered or "bubblewrap" in lowered:
+        return "BwrapLaunchError"
+    if "no such file or directory" in lowered or "cannot open" in lowered:
+        return "RuntimeMountError"
+    return type(exc).__name__ if exc is not None else "WorkerNoOutput"
 
 
 class _ChildGatewayProxy:
@@ -669,6 +716,12 @@ class SandboxManager:
         self.transport: str | None = None
         self._stdio_queue: queue.Queue[dict[str, Any]] | None = None
         self._stdio_reader_thread: threading.Thread | None = None
+        self._stdio_stdout_path: Path | None = None
+        self._stdio_stderr_path: Path | None = None
+        self._stdio_stdout_handle: Any = None
+        self._stdio_stderr_handle: Any = None
+        self._stdio_command: list[str] | None = None
+        self._stdio_env_keys: list[str] | None = None
         self._sandbox_backend_name = sandbox_backend
         self._sandbox_backend: SandboxBackend | None = None
         self.require_enforced_sandbox = require_enforced_sandbox
@@ -850,16 +903,48 @@ class SandboxManager:
                     f"strict sandbox could not prepare backend {backend.report.name}: {exc}"
                 ) from exc
             backend.report.warnings.append(str(exc))
-        self.process = subprocess.Popen(
-            command,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
-            encoding="utf-8",
-            bufsize=1,
-            env=self._subprocess_env(),
+        data_dir = self.plugin_dir / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+        self._stdio_stdout_path = data_dir / "stdio-worker.stdout.log"
+        self._stdio_stderr_path = data_dir / "stdio-worker.stderr.log"
+        self._stdio_stdout_handle = self._stdio_stdout_path.open("w+", encoding="utf-8")
+        self._stdio_stderr_handle = self._stdio_stderr_path.open("w+", encoding="utf-8")
+        env = self._subprocess_env()
+        self._stdio_command = list(command)
+        self._stdio_env_keys = sorted(env.keys())
+        self.os_limits["stdio_diagnostics"] = self._stdio_diagnostics(
+            error_type=None,
+            error=None,
+            command=command,
+            env=env,
+            worker_started=False,
+            json_result_received=False,
         )
+        try:
+            self.process = subprocess.Popen(
+                command,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=self._stdio_stderr_handle,
+                text=True,
+                encoding="utf-8",
+                bufsize=1,
+                env=env,
+            )
+        except Exception as exc:
+            self._sandbox_backend = backend
+            self._record_backend_report(backend.report)
+            diagnostics = self._stdio_diagnostics(
+                error_type=_classify_stdio_failure(exc, ""),
+                error=str(exc),
+                command=command,
+                env=env,
+                worker_started=False,
+                json_result_received=False,
+            )
+            self.os_limits["stdio_diagnostics"] = diagnostics
+            self._close_stdio_pipes()
+            raise SandboxStartupError(f"plugin stdio sandbox launch failed: {exc}", diagnostics) from exc
         try:
             self._attach_sandbox_backend(backend)
         except Exception:
@@ -873,14 +958,56 @@ class SandboxManager:
             daemon=True,
         )
         self._stdio_reader_thread.start()
-        message = self._stdio_read(timeout=5.0)
+        try:
+            message = self._stdio_read(timeout=5.0)
+        except queue.Empty as exc:
+            diagnostics = self._stdio_diagnostics(
+                error_type=_classify_stdio_failure(exc, self._read_stdio_stderr_excerpt()),
+                error="plugin stdio worker did not emit a startup message",
+                command=command,
+                env=env,
+                worker_started=False,
+                json_result_received=False,
+            )
+            self.os_limits["stdio_diagnostics"] = diagnostics
+            self.stop()
+            raise SandboxStartupError("plugin stdio worker produced no startup message", diagnostics) from exc
+        except SandboxProtocolError as exc:
+            diagnostics = self._stdio_diagnostics(
+                error_type="WorkerJsonDecodeError",
+                error=str(exc),
+                command=command,
+                env=env,
+                worker_started=True,
+                json_result_received=False,
+            )
+            self.os_limits["stdio_diagnostics"] = diagnostics
+            self.stop()
+            raise SandboxStartupError(f"plugin stdio worker sent invalid startup JSON: {exc}", diagnostics) from exc
         self._merge_os_limits(message.get("os_limits", {}))
         self.os_limits["transport_fallback"] = fallback_reason
         self.os_limits["runtime_python"] = self.runtime_python
         if message.get("status") == "ready":
+            self.os_limits["stdio_diagnostics"] = self._stdio_diagnostics(
+                error_type=None,
+                error=None,
+                command=command,
+                env=env,
+                worker_started=True,
+                json_result_received=True,
+            )
             return True
+        diagnostics = self._stdio_diagnostics(
+            error_type=str(message.get("error_type") or "WorkerStartupError"),
+            error=str(message.get("error") or "plugin stdio sandbox failed to start"),
+            command=command,
+            env=env,
+            worker_started=True,
+            json_result_received=True,
+        )
+        self.os_limits["stdio_diagnostics"] = diagnostics
         self.stop()
-        raise SandboxStartupError(message.get("error", "plugin stdio sandbox failed to start"))
+        raise SandboxStartupError(message.get("error", "plugin stdio sandbox failed to start"), diagnostics)
 
     def _execute_in_process(self, action: str, payload: dict[str, Any]) -> dict[str, Any]:
         if action == "run_middleware":
@@ -1013,10 +1140,32 @@ class SandboxManager:
                     continue
                 return {key: value for key, value in message.items() if key != "kind"}
         except queue.Empty:
+            diagnostics = self._stdio_diagnostics(
+                error_type="Timeout",
+                error="plugin execution timed out",
+                command=self._stdio_command,
+                env_keys=self._stdio_env_keys,
+                worker_started=True,
+                json_result_received=False,
+            )
+            self.os_limits["stdio_diagnostics"] = diagnostics
             self.stop()
-            return {"status": "error", "error": "plugin execution timed out"}
+            return {"status": "error", "error": "plugin execution timed out", "diagnostics": diagnostics}
         except Exception as exc:
-            return {"status": "error", "error": f"sandbox stdio communication error: {exc}"}
+            diagnostics = self._stdio_diagnostics(
+                error_type=_classify_stdio_failure(exc, self._read_stdio_stderr_excerpt()),
+                error=str(exc),
+                command=self._stdio_command,
+                env_keys=self._stdio_env_keys,
+                worker_started=True,
+                json_result_received=False,
+            )
+            self.os_limits["stdio_diagnostics"] = diagnostics
+            return {
+                "status": "error",
+                "error": f"sandbox stdio communication error: {exc}",
+                "diagnostics": diagnostics,
+            }
 
     def _stdio_reader(self) -> None:
         if not isinstance(self.process, subprocess.Popen) or self.process.stdout is None:
@@ -1025,6 +1174,12 @@ class SandboxManager:
             line = self.process.stdout.readline(MAX_IPC_MESSAGE_BYTES + 1)
             if not line:
                 return
+            if self._stdio_stdout_handle:
+                try:
+                    self._stdio_stdout_handle.write(line)
+                    self._stdio_stdout_handle.flush()
+                except Exception:
+                    pass
             if len(line.encode("utf-8")) > MAX_IPC_MESSAGE_BYTES:
                 message = {
                     "kind": "protocol_error",
@@ -1098,13 +1253,69 @@ class SandboxManager:
 
     def _close_stdio_pipes(self) -> None:
         if not isinstance(self.process, subprocess.Popen):
+            for stream in [self._stdio_stdout_handle, self._stdio_stderr_handle]:
+                try:
+                    if stream:
+                        stream.close()
+                except Exception:
+                    pass
+            self._stdio_stdout_handle = None
+            self._stdio_stderr_handle = None
             return
-        for stream in [self.process.stdin, self.process.stdout]:
+        for stream in [self.process.stdin, self.process.stdout, self._stdio_stdout_handle, self._stdio_stderr_handle]:
             try:
                 if stream:
                     stream.close()
             except Exception:
                 pass
+        self._stdio_stdout_handle = None
+        self._stdio_stderr_handle = None
+
+    def _stdio_diagnostics(
+        self,
+        *,
+        error_type: str | None,
+        error: str | None,
+        command: list[str] | None,
+        env: dict[str, str] | None = None,
+        env_keys: list[str] | None = None,
+        worker_started: bool,
+        json_result_received: bool,
+    ) -> dict[str, Any]:
+        process = self.process if isinstance(self.process, subprocess.Popen) else None
+        backend = self.os_limits.get("sandbox_backend", {})
+        backend_details = backend.get("details", {}) if isinstance(backend, dict) else {}
+        argv = list(command or self._stdio_command or [])
+        executable = argv[0] if argv else self.runtime_python
+        stderr_excerpt = self._read_stdio_stderr_excerpt()
+        stdout_excerpt = self._read_stdio_stdout_excerpt()
+        classified_error_type = error_type or _classify_stdio_failure(None, stderr_excerpt)
+        return {
+            "status": "error" if classified_error_type else "ready",
+            "error": error,
+            "error_type": classified_error_type,
+            "returncode": process.poll() if process is not None else None,
+            "stdout_excerpt": stdout_excerpt,
+            "stderr_excerpt": stderr_excerpt,
+            "stderr_path": str(self._stdio_stderr_path) if self._stdio_stderr_path else None,
+            "stdout_path": str(self._stdio_stdout_path) if self._stdio_stdout_path else None,
+            "wrapped_command": backend_details.get("wrapped_argv") or argv,
+            "argv": argv,
+            "cwd": backend_details.get("cwd"),
+            "executable": executable,
+            "python_version": sys.version,
+            "env_keys": sorted(env.keys()) if env is not None else env_keys,
+            "import_probe": None,
+            "runtime_probe": None,
+            "worker_started": worker_started,
+            "json_result_received": json_result_received,
+        }
+
+    def _read_stdio_stderr_excerpt(self) -> str:
+        return _read_text_excerpt(self._stdio_stderr_path)
+
+    def _read_stdio_stdout_excerpt(self) -> str:
+        return _read_text_excerpt(self._stdio_stdout_path)
 
     def _subprocess_env(self) -> dict[str, str]:
         env = dict(os.environ)

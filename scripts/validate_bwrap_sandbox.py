@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import os
 import json
+import subprocess
 import shutil
 import sys
 import tempfile
@@ -20,6 +21,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from modules.plugin_system.audit import AuditLogger
 from modules.plugin_system.engine import PluginEngine
 from modules.plugin_system.loader import PACKAGE_LOCK_FILE, write_package_lock
+from modules.plugin_system.sandbox import SandboxManager
 from modules.plugin_system.sandbox_backend import create_sandbox_backend, sandbox_capabilities
 
 
@@ -43,6 +45,7 @@ PRODUCTION_REQUIRED_CHECKS = {
     "env_blocked",
     "core_blocked",
     "code_readonly",
+    "private_tmp_writable",
     "host_tmp_not_leaked",
     "direct_network_blocked",
     "data_write_allowed",
@@ -54,6 +57,8 @@ def run_validation(
     workdir: str | Path | None = None,
     *,
     mode: str = VALIDATION_MODE_PRODUCTION_REQUIRED,
+    debug: bool = False,
+    keep_workdir: bool = False,
 ) -> dict[str, Any]:
     if mode not in VALIDATION_MODES:
         raise ValueError(f"unsupported bwrap validation mode: {mode}")
@@ -91,10 +96,12 @@ def run_validation(
                 "status": "fail",
                 "reason": "bubblewrap backend is not enforced; production-required validation failed closed without running the sample plugin",
                 "workdir": str(Path(workdir).resolve()) if workdir else None,
-                "result": {
-                    "status": "not_run",
-                    "reason": "production-required mode does not run the validation sample without an enforced bwrap backend",
-                },
+                "result": _default_result_diagnostics(
+                    {
+                        "status": "not_run",
+                        "reason": "production-required mode does not run the validation sample without an enforced bwrap backend",
+                    }
+                ),
                 "checks": _preflight_checks(preflight),
                 "audit_records": 0,
                 "sandbox_backend": preflight,
@@ -105,10 +112,48 @@ def run_validation(
             environment_class=environment_class,
         )
 
-    report = _run_sample_validation(workdir, mode=mode)
-    if not report.get("sandbox_backend"):
-        report["sandbox_backend"] = preflight
-    return _finalize_report(report, mode=mode, environment_class=environment_class)
+    root = Path(workdir).resolve() if workdir else Path(tempfile.mkdtemp(prefix="humanoid-bwrap-"))
+    root.mkdir(parents=True, exist_ok=True)
+    should_cleanup = workdir is None and not keep_workdir
+    try:
+        if mode == VALIDATION_MODE_PRODUCTION_REQUIRED:
+            preflight_result = _run_bwrap_preflight(root, preflight)
+            if preflight_result.get("status") != "pass":
+                return _finalize_report(
+                    {
+                        "status": "fail",
+                        "reason": _preflight_failure_reason(preflight_result),
+                        "workdir": str(root),
+                        "result": _default_result_diagnostics(
+                            {
+                                "status": "not_run",
+                                "reason": "production-required validation sample was not run because bwrap preflight failed",
+                            }
+                        ),
+                        "checks": _preflight_failure_checks(preflight, preflight_result),
+                        "audit_records": 0,
+                        "sandbox_backend": preflight,
+                        "preflight": preflight_result,
+                        "observations": {"sample_executed": False},
+                        "recommendation": _preflight_recommendation(preflight_result),
+                    },
+                    mode=mode,
+                    environment_class=environment_class,
+                )
+        else:
+            preflight_result = None
+
+        report = _run_sample_validation(root, mode=mode)
+        if preflight_result is not None:
+            report["preflight"] = preflight_result
+        if not report.get("sandbox_backend"):
+            report["sandbox_backend"] = preflight
+        if not debug:
+            _trim_debug_paths(report)
+        return _finalize_report(report, mode=mode, environment_class=environment_class)
+    finally:
+        if should_cleanup:
+            shutil.rmtree(root, ignore_errors=True)
 
 
 def _run_sample_validation(
@@ -139,8 +184,17 @@ def _run_sample_validation(
         )
         try:
             metadata = engine.install(package)
-            engine.grant_permissions("bwrap_validation_plugin")
-            sandbox = engine.start_plugin("bwrap_validation_plugin")
+            installed = engine.grant_permissions("bwrap_validation_plugin")
+            sandbox = SandboxManager(
+                installed,
+                plugins_dir=plugins_dir,
+                gateway=engine.gateway,
+                sandbox_backend="bubblewrap",
+                require_enforced_sandbox=mode == VALIDATION_MODE_PRODUCTION_REQUIRED,
+            )
+            sandbox.start()
+            engine.sandboxes["bwrap_validation_plugin"] = sandbox
+            engine.gateway.register_sandbox(sandbox)
             backend_details = dict(sandbox.os_limits.get("sandbox_backend", {}).get("details", {}))
             result = sandbox.execute_with_timeout(
                 "execute_tool",
@@ -162,6 +216,7 @@ def _run_sample_validation(
             )
             os_limits = sandbox.os_limits
             sandbox_backend = sandbox.os_limits.get("sandbox_backend", {})
+            result = _merge_result_diagnostics(result, sandbox.os_limits)
             result.setdefault("request_id", None)
             engine.audit_logger.record(
                 "plugin.tool_call",
@@ -172,7 +227,15 @@ def _run_sample_validation(
                 details={"arg_keys": ["code_file", "core_file", "home_secret", "host_tmp_file", "project_env"]},
             )
         except Exception as exc:
-            result = {"status": "error", "error": str(exc), "error_type": type(exc).__name__}
+            diagnostics = getattr(exc, "diagnostics", {})
+            result = _merge_result_diagnostics(
+                {
+                    "status": "error",
+                    "error": str(exc),
+                    "error_type": _diagnostic_error_type(type(exc).__name__, diagnostics),
+                },
+                diagnostics if diagnostics else (sandbox.os_limits if "sandbox" in locals() else {}),
+            )
             if "sandbox" in locals():
                 os_limits = sandbox.os_limits
                 sandbox_backend = sandbox.os_limits.get("sandbox_backend", {})
@@ -256,6 +319,354 @@ def _backend_has_required_capabilities(backend: dict[str, Any]) -> bool:
     return bool(backend.get("enforced")) and all(
         capabilities.get(capability) is True for capability in PRODUCTION_REQUIRED_CAPABILITIES
     )
+
+
+def _run_bwrap_preflight(root: Path, backend: dict[str, Any]) -> dict[str, Any]:
+    plugin_dir = (root / "preflight_plugin").resolve()
+    plugin_dir.mkdir(parents=True, exist_ok=True)
+    (plugin_dir / "src").mkdir(parents=True, exist_ok=True)
+    (plugin_dir / "src" / "__init__.py").write_text("", encoding="utf-8")
+    (plugin_dir / "plugin.yaml").write_text("name: preflight_plugin\n", encoding="utf-8")
+    data_dir = (plugin_dir / "data").resolve()
+    data_dir.mkdir(parents=True, exist_ok=True)
+    code_write_probe = (plugin_dir / "src" / "preflight_write_probe.txt").resolve()
+    project_env = (Path.cwd() / ".env").resolve()
+    previous_env = project_env.read_text(encoding="utf-8") if project_env.exists() else None
+    core_file = (Path.cwd() / "SPECIFICATION").resolve()
+    home_secret = Path.home() / f".humanoid_agi_bwrap_preflight_{uuid.uuid4().hex}"
+    wrapped: list[str] | None = None
+    stderr = ""
+    stdout = ""
+    returncode: int | None = None
+    backend_details = backend.get("details", {}) if isinstance(backend.get("details"), dict) else {}
+    try:
+        project_env.write_text("bwrap-preflight-env-secret", encoding="utf-8")
+        home_secret.write_text("bwrap-preflight-home-secret", encoding="utf-8")
+        script = _preflight_script(plugin_dir, data_dir, code_write_probe, home_secret.resolve(), project_env, core_file)
+        command = [
+            sys.executable,
+            "-c",
+            script,
+        ]
+        bwrap_backend = create_sandbox_backend(128, 2, requested="bubblewrap")
+        wrapped = bwrap_backend.prepare_subprocess(
+            command,
+            plugin_dir=plugin_dir,
+            project_root=PROJECT_ROOT,
+        )
+        backend_details = dict(bwrap_backend.report.details)
+        completed = subprocess.run(
+            wrapped,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            timeout=10,
+        )
+        stdout = completed.stdout
+        stderr = completed.stderr
+        returncode = completed.returncode
+    except subprocess.TimeoutExpired as exc:
+        stderr = str(exc)
+        returncode = None
+    except Exception as exc:
+        stderr = f"{type(exc).__name__}: {exc}"
+        returncode = None
+        command = [sys.executable, "-c", ""]
+    finally:
+        if previous_env is None:
+            try:
+                project_env.unlink()
+            except FileNotFoundError:
+                pass
+        else:
+            project_env.write_text(previous_env, encoding="utf-8")
+        try:
+            home_secret.unlink()
+        except FileNotFoundError:
+            pass
+
+    payload = _load_json_from_stdout(stdout)
+    import_error = None
+    if isinstance(payload, dict):
+        import_error = payload.get("import_error")
+    checks = _preflight_statuses(payload if isinstance(payload, dict) else {})
+    failed = [name for name, status in checks.items() if status != "pass"]
+    status = "pass" if returncode == 0 and isinstance(payload, dict) and not failed else "fail"
+    return {
+        "status": status,
+        "python_start": checks.get("python_start", "fail"),
+        "import_runtime": checks.get("import_runtime", "fail"),
+        "import_error": import_error,
+        "tmp_writable": checks.get("tmp_writable", "fail"),
+        "data_dir_writable": checks.get("data_dir_writable", "fail"),
+        "code_dir_readonly": checks.get("code_dir_readonly", "fail"),
+        "host_home_blocked": checks.get("host_home_blocked", "fail"),
+        "env_blocked": checks.get("env_blocked", "fail"),
+        "core_blocked": checks.get("core_blocked", "fail"),
+        "stdout": _excerpt(stdout),
+        "stderr": _excerpt(stderr),
+        "returncode": returncode,
+        "wrapped_command": wrapped,
+        "argv": command,
+        "cwd": backend_details.get("cwd"),
+        "executable": sys.executable,
+        "python_version": sys.version,
+        "env_keys": None,
+        "import_probe": _import_probe_from_payload(payload),
+        "runtime_probe": payload if isinstance(payload, dict) else None,
+        "worker_started": returncode is not None,
+        "json_result_received": isinstance(payload, dict),
+    }
+
+
+def _preflight_script(
+    plugin_dir: Path,
+    data_dir: Path,
+    code_write_probe: Path,
+    home_probe: Path,
+    project_env: Path,
+    core_file: Path,
+) -> str:
+    payload = {
+        "plugin_dir": str(plugin_dir),
+        "data_dir": str(data_dir),
+        "code_write_probe": str(code_write_probe),
+        "home_probe": str(home_probe),
+        "project_env": str(project_env),
+        "core_file": str(core_file),
+    }
+    return (
+        "import importlib, json, pathlib, sys, tempfile\n"
+        f"p = json.loads({json.dumps(payload)!r})\n"
+        "def can_read(path):\n"
+        "    try:\n"
+        "        with open(path, 'r', encoding='utf-8', errors='ignore') as handle:\n"
+        "            handle.read(1)\n"
+        "        return True\n"
+        "    except Exception:\n"
+        "        return False\n"
+        "def can_write(path):\n"
+        "    try:\n"
+        "        target = pathlib.Path(path)\n"
+        "        target.parent.mkdir(parents=True, exist_ok=True)\n"
+        "        target.write_text('ok', encoding='utf-8')\n"
+        "        return True\n"
+        "    except Exception:\n"
+        "        return False\n"
+        "import_error = None\n"
+        "modules_ok = True\n"
+        "try:\n"
+        "    importlib.import_module('modules.plugin_system')\n"
+        "    importlib.import_module('modules.plugin_system.sandbox_stdio_worker')\n"
+        "except Exception as exc:\n"
+        "    modules_ok = False\n"
+        "    import_error = type(exc).__name__ + ': ' + str(exc)\n"
+        "tmp_target = pathlib.Path(tempfile.gettempdir()) / 'humanoid-preflight.tmp'\n"
+        "data_target = pathlib.Path(p['data_dir']) / 'preflight-data.txt'\n"
+        "result = {\n"
+        "    'ok': True,\n"
+        "    'executable': sys.executable,\n"
+        "    'version': sys.version,\n"
+        "    'sys_path': sys.path,\n"
+        "    'editable_install': any(str(item).endswith('.egg-link') for item in sys.path),\n"
+        "    'modules_plugin_system_imported': modules_ok,\n"
+        "    'sandbox_stdio_worker_imported': modules_ok,\n"
+        "    'import_error': import_error,\n"
+        "    'tmp_writable': can_write(tmp_target),\n"
+        "    'data_dir_writable': can_write(data_target),\n"
+        "    'code_writable': can_write(p['code_write_probe']),\n"
+        "    'home_readable': can_read(p['home_probe']),\n"
+        "    'env_readable': can_read(p['project_env']),\n"
+        "    'core_readable': can_read(p['core_file']),\n"
+        "}\n"
+        "print(json.dumps(result, sort_keys=True))\n"
+        "raise SystemExit(0 if modules_ok and result['tmp_writable'] and result['data_dir_writable'] and not result['code_writable'] and not result['home_readable'] and not result['env_readable'] and not result['core_readable'] else 1)\n"
+    )
+
+
+def _load_json_from_stdout(stdout: str) -> dict[str, Any] | None:
+    for line in reversed(stdout.splitlines()):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            return payload
+    return None
+
+
+def _preflight_statuses(payload: dict[str, Any]) -> dict[str, str]:
+    return {
+        "python_start": "pass" if payload.get("ok") is True else "fail",
+        "import_runtime": "pass" if payload.get("modules_plugin_system_imported") is True else "fail",
+        "tmp_writable": "pass" if payload.get("tmp_writable") is True else "fail",
+        "data_dir_writable": "pass" if payload.get("data_dir_writable") is True else "fail",
+        "code_dir_readonly": "pass" if payload.get("code_writable") is False else "fail",
+        "host_home_blocked": "pass" if payload.get("home_readable") is False else "fail",
+        "env_blocked": "pass" if payload.get("env_readable") is False else "fail",
+        "core_blocked": "pass" if payload.get("core_readable") is False else "fail",
+    }
+
+
+def _import_probe_from_payload(payload: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(payload, dict):
+        return None
+    return {
+        "editable_install": payload.get("editable_install"),
+        "sys_path": payload.get("sys_path"),
+        "modules_plugin_system_imported": payload.get("modules_plugin_system_imported"),
+        "sandbox_stdio_worker_imported": payload.get("sandbox_stdio_worker_imported"),
+        "import_error": payload.get("import_error"),
+    }
+
+
+def _preflight_failure_reason(preflight: dict[str, Any]) -> str:
+    if preflight.get("import_runtime") != "pass":
+        return "runtime import failed under bwrap"
+    if preflight.get("tmp_writable") != "pass":
+        return "private tmp is not writable under bwrap"
+    if preflight.get("data_dir_writable") != "pass":
+        return "plugin data directory is not writable under bwrap"
+    if preflight.get("code_dir_readonly") != "pass":
+        return "plugin code directory is writable under bwrap"
+    if preflight.get("host_home_blocked") != "pass":
+        return "host HOME is readable under bwrap"
+    if preflight.get("env_blocked") != "pass":
+        return "host .env is readable under bwrap"
+    if preflight.get("core_blocked") != "pass":
+        return "project core is readable under bwrap"
+    return "bwrap runtime preflight failed"
+
+
+def _preflight_recommendation(preflight: dict[str, Any]) -> str:
+    reason = _preflight_failure_reason(preflight)
+    if "import" in reason:
+        return "Fix the trusted runtime bundle or Python environment mounted into bwrap, then rerun production-required validation."
+    if "data directory" in reason:
+        return "Fix writable plugin data bind mount configuration, then rerun production-required validation."
+    if "tmp" in reason:
+        return "Fix private /tmp bwrap mount configuration, then rerun production-required validation."
+    return "Fix the bwrap mount policy reported by preflight, then rerun production-required validation."
+
+
+def _preflight_failure_checks(backend: dict[str, Any], preflight: dict[str, Any]) -> list[dict[str, Any]]:
+    details = backend.get("details", {}) if isinstance(backend.get("details"), dict) else {}
+    capabilities = backend.get("capabilities", {}) if isinstance(backend.get("capabilities"), dict) else {}
+    wrapped_command = preflight.get("wrapped_command")
+    checks = [
+        ("plugin_executed", False, "validation sample did not run because bwrap preflight failed"),
+        ("bwrap_backend_enforced", bool(backend.get("enforced")), "bubblewrap backend must be enforced"),
+        ("bwrap_wrapped_command", details.get("wrapped_command") is True or bool(wrapped_command), "preflight must be launched through bwrap"),
+        ("bwrap_unshared_network", details.get("network") == "unshared" or _wrapped_command_has(wrapped_command, "--unshare-net"), "bwrap must unshare network namespace"),
+        ("bwrap_private_tmp", details.get("tmp") == "private_tmpfs" or _wrapped_command_has_sequence(wrapped_command, "--tmpfs", "/tmp"), "bwrap must provide a private /tmp"),
+        ("filesystem_isolation", capabilities.get("filesystem_isolation") is True, "bwrap must provide filesystem isolation"),
+        ("network_isolation", capabilities.get("network_isolation") is True, "bwrap must provide network isolation"),
+        ("process_containment", capabilities.get("process_containment") is True, "bwrap must provide process containment"),
+        ("resource_limits", capabilities.get("resource_limits") is True, "worker resource limits must be available"),
+        ("runtime_import", preflight.get("import_runtime") == "pass", "trusted runtime must import under bwrap"),
+        ("private_tmp_writable", preflight.get("tmp_writable") == "pass", "sandbox private /tmp should be writable"),
+        ("data_write_allowed", preflight.get("data_dir_writable") == "pass", "plugin data directory should be writable"),
+        ("code_readonly", preflight.get("code_dir_readonly") == "pass", "plugin code directory must be read-only"),
+        ("host_home_blocked", preflight.get("host_home_blocked") == "pass", "host HOME must not be readable"),
+        ("env_blocked", preflight.get("env_blocked") == "pass", ".env must not be readable"),
+        ("core_blocked", preflight.get("core_blocked") == "pass", "project core must not be readable"),
+    ]
+    return [
+        {"check_id": check_id, "status": "pass" if passed else "fail", "reason": reason}
+        for check_id, passed, reason in checks
+    ]
+
+
+def _wrapped_command_has(command: Any, token: str) -> bool:
+    return isinstance(command, list) and token in command
+
+
+def _wrapped_command_has_sequence(command: Any, first: str, second: str) -> bool:
+    if not isinstance(command, list):
+        return False
+    return any(left == first and right == second for left, right in zip(command, command[1:]))
+
+
+def _default_result_diagnostics(result: dict[str, Any] | None = None) -> dict[str, Any]:
+    payload = dict(result or {})
+    payload.setdefault("status", "error")
+    payload.setdefault("error", None)
+    payload.setdefault("error_type", None)
+    payload.setdefault("returncode", None)
+    payload.setdefault("stdout_excerpt", None)
+    payload.setdefault("stderr_excerpt", None)
+    payload.setdefault("stderr_path", None)
+    payload.setdefault("stdout_path", None)
+    payload.setdefault("wrapped_command", None)
+    payload.setdefault("argv", None)
+    payload.setdefault("cwd", None)
+    payload.setdefault("executable", sys.executable)
+    payload.setdefault("python_version", sys.version)
+    payload.setdefault("env_keys", None)
+    payload.setdefault("import_probe", None)
+    payload.setdefault("runtime_probe", None)
+    payload.setdefault("worker_started", False)
+    payload.setdefault("json_result_received", False)
+    return payload
+
+
+def _merge_result_diagnostics(result: dict[str, Any], diagnostics_source: dict[str, Any]) -> dict[str, Any]:
+    diagnostics = diagnostics_source.get("stdio_diagnostics", diagnostics_source)
+    merged = _default_result_diagnostics(result)
+    if isinstance(diagnostics, dict):
+        for key in [
+            "returncode",
+            "stdout_excerpt",
+            "stderr_excerpt",
+            "stderr_path",
+            "stdout_path",
+            "wrapped_command",
+            "argv",
+            "cwd",
+            "executable",
+            "python_version",
+            "env_keys",
+            "import_probe",
+            "runtime_probe",
+            "worker_started",
+            "json_result_received",
+        ]:
+            if diagnostics.get(key) is not None:
+                merged[key] = diagnostics.get(key)
+        if not merged.get("error_type") and diagnostics.get("error_type"):
+            merged["error_type"] = diagnostics.get("error_type")
+        if not merged.get("error") and diagnostics.get("error"):
+            merged["error"] = diagnostics.get("error")
+    if result.get("status") == "success":
+        merged["worker_started"] = True
+        merged["json_result_received"] = True
+    return merged
+
+
+def _diagnostic_error_type(fallback: str, diagnostics: Any) -> str:
+    if isinstance(diagnostics, dict) and diagnostics.get("error_type"):
+        return str(diagnostics["error_type"])
+    return fallback
+
+
+def _excerpt(text: str | None, limit: int = 4096) -> str:
+    value = text or ""
+    return value[-limit:]
+
+
+def _trim_debug_paths(report: dict[str, Any]) -> None:
+    result = report.get("result")
+    if not isinstance(result, dict):
+        return
+    for key in ["stdout_excerpt", "stderr_excerpt"]:
+        value = result.get(key)
+        if isinstance(value, str) and len(value) > 1000:
+            result[key] = value[-1000:]
 
 
 def _preflight_checks(backend: dict[str, Any]) -> list[dict[str, Any]]:
@@ -492,6 +903,7 @@ def _evaluate_result(
     observations = observations or {}
     backend = os_limits.get("sandbox_backend", {})
     backend_details = backend.get("details", {}) if isinstance(backend, dict) else {}
+    runtime_observation_missing = result.get("status") != "success"
     checks = [
         ("plugin_executed", result.get("status") == "success", "validation plugin should execute inside sandbox"),
         ("bwrap_backend_enforced", bool(backend.get("enforced")), "bubblewrap backend must be enforced"),
@@ -509,7 +921,7 @@ def _evaluate_result(
         ("audit_records_present", len(audit_logger.read_records()) > 0, "audit records should be present"),
     ]
     results: list[dict[str, Any]] = [
-        {"check_id": check_id, "status": "pass" if passed else "fail", "reason": reason}
+        _check_result(check_id, passed, reason, runtime_observation_missing)
         for check_id, passed, reason in checks
     ]
     results.append(
@@ -523,6 +935,27 @@ def _evaluate_result(
     return results
 
 
+def _check_result(
+    check_id: str,
+    passed: bool,
+    reason: str,
+    runtime_observation_missing: bool,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {"check_id": check_id, "status": "pass" if passed else "fail", "reason": reason}
+    if runtime_observation_missing and check_id in {
+        "host_home_blocked",
+        "env_blocked",
+        "core_blocked",
+        "code_readonly",
+        "private_tmp_writable",
+        "direct_network_blocked",
+        "data_write_allowed",
+    }:
+        payload["runtime_observation"] = "missing"
+        payload["reason"] = f"{reason}; runtime sample did not return data"
+    return payload
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Validate Linux bubblewrap plugin sandbox behavior")
     parser.add_argument("--workdir")
@@ -533,16 +966,30 @@ def main(argv: list[str] | None = None) -> int:
         help="diagnostic records hosted-runner capability details; production-required fails closed before running samples if bwrap is not enforced",
     )
     parser.add_argument("--json", action="store_true", dest="json_output")
+    parser.add_argument("--debug", action="store_true", help="include full diagnostic excerpts and command fields")
+    parser.add_argument(
+        "--keep-workdir",
+        action="store_true",
+        help="keep the temporary validation workdir after failure for inspection",
+    )
+    parser.add_argument("--output", help="write JSON evidence directly to this path")
     args = parser.parse_args(argv)
-    report = run_validation(args.workdir, mode=args.mode)
+    report = run_validation(args.workdir, mode=args.mode, debug=args.debug, keep_workdir=args.keep_workdir)
+    rendered_json = json.dumps(report, indent=2, sort_keys=True)
+    if args.output:
+        output_path = Path(args.output)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(rendered_json + "\n", encoding="utf-8")
     if args.json_output:
-        print(json.dumps(report, indent=2, sort_keys=True))
+        print(rendered_json)
     else:
         print(
             "bwrap validation "
             f"mode={report.get('mode')} environment={report.get('environment_class')} "
             f"status={report['status']} reason={report.get('reason', '')}"
         )
+        if args.output:
+            print(f"evidence: {args.output}")
         for item in report.get("checks", []):
             print(f"- [{item['status']}] {item['check_id']}: {item['reason']}")
     return 0 if report["status"] == "pass" else 1

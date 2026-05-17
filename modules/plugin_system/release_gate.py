@@ -284,8 +284,9 @@ def _bwrap_finding(payload: dict[str, Any] | None) -> GateFinding:
         )
 
     if status != "pass":
+        failure_id = _bwrap_failure_check_id(payload)
         return GateFinding(
-            check_id,
+            failure_id,
             "fail",
             str(payload.get("reason") or payload.get("summary") or f"{check_id} status={status}"),
             production_blocking=True,
@@ -303,6 +304,24 @@ def _bwrap_finding(payload: dict[str, Any] | None) -> GateFinding:
         "bwrap evidence is missing enforced backend capabilities or critical pass checks",
         production_blocking=True,
     )
+
+
+def _bwrap_failure_check_id(payload: dict[str, Any]) -> str:
+    backend = payload.get("sandbox_backend")
+    if _bwrap_backend_enforced(backend):
+        preflight = payload.get("preflight")
+        if isinstance(preflight, dict) and preflight.get("status") != "pass":
+            reason = str(payload.get("reason") or "").lower()
+            if preflight.get("import_runtime") == "fail" or "import" in reason:
+                return "bwrap.validation.runtime_import_failed"
+            return "bwrap.validation.preflight_failed"
+        result = payload.get("result")
+        if isinstance(result, dict):
+            if result.get("worker_started") is False or result.get("json_result_received") is False:
+                return "bwrap.validation.worker_execution_failed"
+            if str(result.get("error_type", "")).lower() in {"workernooutput", "workerimporterror", "bwraplauncherror", "runtimemounterror"}:
+                return "bwrap.validation.worker_execution_failed"
+    return "bwrap.validation"
 
 
 def _bwrap_backend_enforced(backend: Any) -> bool:
@@ -327,6 +346,7 @@ def _bwrap_critical_checks_pass(checks: Any) -> bool:
         "env_blocked",
         "core_blocked",
         "code_readonly",
+        "private_tmp_writable",
         "host_tmp_not_leaked",
         "direct_network_blocked",
         "data_write_allowed",

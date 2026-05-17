@@ -420,6 +420,12 @@ class BubblewrapBackend(SandboxBackend):
                 "network": "unshared",
                 "tmp": "private_tmpfs",
                 "home": str(data_dir),
+                "tmpdir": "/tmp",
+                "data_dir": str(data_dir),
+                "code_dir": str(plugin_source_dir),
+                "cwd": str(data_dir),
+                "wrapped_argv": list(wrapped),
+                "inner_argv": list(command),
             }
         )
         return wrapped
@@ -562,6 +568,7 @@ def _prepare_runtime_package(project_root: Path, runtime_root: Path) -> Path:
         "sandbox.py",
         "sandbox_backend.py",
         "sandbox_stdio_worker.py",
+        "signing.py",
     ]
     for filename in runtime_files:
         source = source_plugin_system / filename
@@ -573,12 +580,11 @@ def _prepare_runtime_package(project_root: Path, runtime_root: Path) -> Path:
 
 def _python_runtime_bind_paths(python_executable: str) -> list[Path]:
     executable = Path(python_executable)
-    paths = [executable]
     parents = list(executable.parents)
     venv_root = next((parent for parent in parents if (parent / "pyvenv.cfg").exists()), None)
     if venv_root is not None:
-        paths.append(venv_root)
-    return _dedupe_existing_paths(paths)
+        return _dedupe_existing_paths([venv_root])
+    return _dedupe_existing_paths([executable])
 
 
 def _dedupe_existing_paths(paths: list[Path]) -> list[Path]:
