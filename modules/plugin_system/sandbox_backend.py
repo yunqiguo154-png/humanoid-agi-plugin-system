@@ -572,12 +572,12 @@ def _dedupe_existing_paths(paths: list[Path]) -> list[Path]:
     for path in paths:
         if not path.exists():
             continue
-        resolved = path.resolve()
-        key = str(resolved)
+        candidate = path if path.is_absolute() else path.resolve()
+        key = str(candidate)
         if key in seen:
             continue
         seen.add(key)
-        existing.append(resolved)
+        existing.append(candidate)
     return existing
 
 
