@@ -102,6 +102,64 @@ class ReleaseGateTests(unittest.TestCase):
         )
         self.assertEqual(result.decision, NO_GO)
 
+    def test_github_actions_completed_success_with_full_matrix_passes_ci(self) -> None:
+        result = evaluate_release_gate(
+            GateInput(
+                ci={
+                    "status": "completed",
+                    "conclusion": "success",
+                    "linux_python_3_11": "pass",
+                    "linux_python_3_12": "pass",
+                    "linux_python_3_13": "pass",
+                    "windows_python_3_11": "pass",
+                    "windows_python_3_12": "pass",
+                    "windows_python_3_13": "pass",
+                    "ruff_result": "pass",
+                    "mypy_result": "pass",
+                    "unittest_result": "pass",
+                    "coverage_result": "pass",
+                },
+                doctor={"status": "pass", "production_blocking": False, "checks": [{"check_id": "doctor", "status": "pass"}]},
+                bwrap={"status": "pass"},
+                audit={"status": "pass", "checkpoint": {"status": "success"}},
+                scan={"policy_decision": "pass"},
+                registry={"status": "pass"},
+                revocation={"status": "pass"},
+                quarantine={"status": "pass"},
+                rollback={"status": "pass"},
+            )
+        )
+        self.assertEqual(result.decision, GO)
+
+    def test_github_actions_completed_success_with_failed_matrix_is_no_go(self) -> None:
+        result = evaluate_release_gate(
+            GateInput(
+                ci={
+                    "status": "completed",
+                    "conclusion": "success",
+                    "linux_python_3_11": "pass",
+                    "linux_python_3_12": "failed",
+                    "linux_python_3_13": "pass",
+                    "windows_python_3_11": "pass",
+                    "windows_python_3_12": "pass",
+                    "windows_python_3_13": "pass",
+                    "ruff_result": "pass",
+                    "mypy_result": "pass",
+                    "unittest_result": "pass",
+                    "coverage_result": "pass",
+                },
+                doctor={"status": "pass", "production_blocking": False, "checks": [{"check_id": "doctor", "status": "pass"}]},
+                bwrap={"status": "pass"},
+                audit={"status": "pass", "checkpoint": {"status": "success"}},
+                scan={"policy_decision": "pass"},
+                registry={"status": "pass"},
+                revocation={"status": "pass"},
+                quarantine={"status": "pass"},
+                rollback={"status": "pass"},
+            )
+        )
+        self.assertEqual(result.decision, NO_GO)
+
     def test_windows_third_party_production_doctor_finding_is_no_go(self) -> None:
         result = evaluate_release_gate(
             GateInput(

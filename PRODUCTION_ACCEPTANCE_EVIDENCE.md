@@ -8,8 +8,14 @@ This file records the current local RC evidence status. Do not treat missing or 
 |------|----------|
 | GitHub remote | `https://github.com/yunqiguo154-png/humanoid-agi-plugin-system.git`. |
 | GitHub push | `main` and `v0.9.0-rc1` were pushed to `origin`. |
-| CI run URL | Missing. `gh` CLI is unavailable locally and hosted workflow results have not been archived yet; see `evidence/ci_result.json` or `evidence/ci_result.missing.json`. |
-| Commit SHA | `f19a44900229d7cb0dc4fe18d9088359271d21bc`. |
+| GitHub Actions | Pass. |
+| CI run URL | `https://github.com/yunqiguo154-png/humanoid-agi-plugin-system/actions/runs/25985684158`. |
+| GitHub Actions run URL | `https://github.com/yunqiguo154-png/humanoid-agi-plugin-system/actions/runs/25985684158`. |
+| CI matrix | Pass: ubuntu-latest Python 3.11 / 3.12 / 3.13 and windows-latest Python 3.11 / 3.12 / 3.13. |
+| CI quality checks | Pass: unittest, ruff, mypy, and coverage. |
+| Coverage | 71%. |
+| CI evidence head SHA | `36e4fcd51209a05f6ca5902c53970ab4edebf601`. |
+| Commit SHA | `36e4fcd51209a05f6ca5902c53970ab4edebf601` at CI evidence capture. |
 | Branch | `main`. |
 | Working tree status | Clean at local evidence review. Evidence JSON files are local artifacts and are ignored by Git. |
 | Release candidate tag | `v0.9.0-rc1` candidate only, not GA. |
@@ -174,7 +180,7 @@ List accepted risks from `RISK_REGISTER.md`, including owner and expiry/review d
 | --- | --- |
 | `evidence/environment.json` | warn because this is a Windows workstation, not target Linux+bwrap production evidence. |
 | `evidence/local_quality_gate.json` | pass locally: unittest, ruff, mypy, coverage 71%. |
-| `evidence/ci_result.json` | missing, production_blocking. |
+| `evidence/ci_result.json` | pass, manually recorded from GitHub Actions Web UI run `25985684158`; matrix and quality checks passed with 71% coverage. |
 | `evidence/doctor.json` | fail, production_blocking. |
 | `evidence/bwrap_validation.json` | skipped, production_blocking for full production. |
 | `evidence/acceptance_result.json` | not_ready. |

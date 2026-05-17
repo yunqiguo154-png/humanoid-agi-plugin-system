@@ -146,13 +146,50 @@ def _ci_finding(payload: dict[str, Any] | None, risks_accepted: bool) -> GateFin
             "CI result metadata is missing" + ("; accepted risk" if risks_accepted else ""),
             production_blocking=not risks_accepted,
         )
-    status = _normalized_status(payload)
+    status = _ci_status(payload)
     return GateFinding(
         "ci.matrix",
         "pass" if status == "pass" else "fail",
         str(payload.get("reason") or payload.get("summary") or f"CI status={status}"),
         production_blocking=status != "pass",
     )
+
+
+def _ci_status(payload: dict[str, Any]) -> str:
+    run_status = str(payload.get("status", "")).strip().lower()
+    if run_status == "completed":
+        conclusion = str(payload.get("conclusion", "")).strip().lower()
+        if conclusion not in {"success", "ok", "passed", "pass"}:
+            return "fail"
+        return "pass" if _ci_results_pass(payload) else "fail"
+
+    status = _normalized_status(payload)
+    if status == "pass" and not _ci_results_pass(payload):
+        return "fail"
+    return status
+
+
+def _ci_results_pass(payload: dict[str, Any]) -> bool:
+    matrix_keys = [
+        "linux_python_3_11",
+        "linux_python_3_12",
+        "linux_python_3_13",
+        "windows_python_3_11",
+        "windows_python_3_12",
+        "windows_python_3_13",
+    ]
+    result_keys = ["ruff_result", "mypy_result", "unittest_result", "coverage_result"]
+    return _optional_group_passes(payload, matrix_keys) and _optional_group_passes(payload, result_keys)
+
+
+def _optional_group_passes(payload: dict[str, Any], keys: list[str]) -> bool:
+    if not any(key in payload for key in keys):
+        return True
+    return all(_is_pass_value(payload.get(key)) for key in keys)
+
+
+def _is_pass_value(value: Any) -> bool:
+    return isinstance(value, str) and value.strip().lower() in {"success", "ok", "passed", "pass"}
 
 
 def _doctor_findings(payload: dict[str, Any] | None) -> list[GateFinding]:
