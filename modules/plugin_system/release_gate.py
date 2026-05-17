@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -60,6 +61,7 @@ def evaluate_release_gate(inputs: GateInput) -> GateResult:
     findings: list[GateFinding] = []
     risks_accepted = _risks_accepted(inputs.risk_acceptance)
     scan_finding = _scan_finding(inputs.scan, risks_accepted)
+    license_finding = _license_scan_finding(inputs.scan, risks_accepted)
     scanner_configured_finding = _scanner_configured_finding(inputs.scan, risks_accepted)
     audit_findings = _audit_findings(inputs.audit, risks_accepted)
 
@@ -69,6 +71,7 @@ def evaluate_release_gate(inputs: GateInput) -> GateResult:
     findings.extend(audit_findings)
     findings.append(scanner_configured_finding)
     findings.append(scan_finding)
+    findings.append(license_finding)
     findings.append(_status_finding("registry.verify", inputs.registry, require_pass=True))
     findings.append(_status_finding("revocation.drill", inputs.revocation, require_pass=True))
     findings.append(_status_finding("quarantine.drill", inputs.quarantine, require_pass=True))
@@ -136,10 +139,29 @@ def _read_json(path: str | Path | None) -> dict[str, Any] | None:
 def _risks_accepted(payload: dict[str, Any] | None) -> bool:
     if not payload:
         return False
-    if payload.get("accepted") is True:
-        return True
     accepted = payload.get("accepted_risks")
-    return isinstance(accepted, list) and bool(accepted)
+    risk_items = accepted if isinstance(accepted, list) and accepted else [payload]
+    if not risk_items or not all(isinstance(item, dict) for item in risk_items):
+        return False
+    return all(_risk_item_formally_accepted(item) for item in risk_items)
+
+
+def _risk_item_formally_accepted(item: dict[str, Any]) -> bool:
+    if item.get("accepted") is not True and item.get("status") != "accepted":
+        return False
+    required_text = ["accepted_by", "role", "scope", "expiry"]
+    if any(not str(item.get(key, "")).strip() for key in required_text):
+        return False
+    controls = item.get("compensating_controls")
+    if not isinstance(controls, list) or not controls:
+        return False
+    try:
+        expiry = datetime.fromisoformat(str(item["expiry"]).replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if expiry.tzinfo is None:
+        expiry = expiry.replace(tzinfo=UTC)
+    return expiry > datetime.now(UTC)
 
 
 def _ci_finding(payload: dict[str, Any] | None, risks_accepted: bool) -> GateFinding:
@@ -469,6 +491,27 @@ def _scan_finding(payload: dict[str, Any] | None, risks_accepted: bool) -> GateF
         "pass" if passed else "fail",
         str(payload.get("reason") or f"scanner status={status} policy_decision={policy_decision}"),
         production_blocking=not passed,
+    )
+
+
+def _license_scan_finding(payload: dict[str, Any] | None, risks_accepted: bool) -> GateFinding:
+    if not _real_scanner_report(payload):
+        return GateFinding(
+            "scanner.license",
+            "warn" if risks_accepted else "fail",
+            "license scanner evidence is missing" + ("; accepted risk" if risks_accepted else ""),
+            production_blocking=not risks_accepted,
+        )
+    coverage = payload.get("coverage")
+    license_scan = isinstance(coverage, dict) and coverage.get("license_scan") is True
+    if license_scan:
+        return GateFinding("scanner.license", "pass", "license scanner evidence is present")
+    return GateFinding(
+        "scanner.license",
+        "warn" if risks_accepted else "fail",
+        "pip-audit covers Python dependency vulnerabilities, not license policy"
+        + ("; accepted risk" if risks_accepted else ""),
+        production_blocking=not risks_accepted,
     )
 
 

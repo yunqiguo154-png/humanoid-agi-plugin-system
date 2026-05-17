@@ -49,7 +49,7 @@ class ReleaseGateTests(unittest.TestCase):
                 revocation={"status": "pass"},
                 quarantine={"status": "pass"},
                 rollback={"status": "pass"},
-                risk_acceptance={"accepted": True, "accepted_risks": ["R-003"]},
+                risk_acceptance=self._risk_acceptance("scanner"),
             )
         )
         self.assertEqual(result.decision, CONTROLLED_GO)
@@ -392,12 +392,29 @@ class ReleaseGateTests(unittest.TestCase):
                 revocation={"status": "pass"},
                 quarantine={"status": "pass"},
                 rollback={"status": "pass"},
-                risk_acceptance={"accepted": True, "accepted_risks": ["AUDIT-ANCHOR"]},
+                risk_acceptance=self._risk_acceptance("audit.external_anchor"),
             )
         )
         findings = {item.check_id: item for item in result.findings}
         self.assertFalse(findings["audit.external_anchor_missing"].production_blocking)
         self.assertEqual(result.decision, CONTROLLED_GO)
+
+    def test_incomplete_risk_acceptance_does_not_unlock_controlled_go(self) -> None:
+        result = evaluate_release_gate(
+            GateInput(
+                ci={"status": "pass"},
+                doctor={"status": "pass", "production_blocking": False, "checks": []},
+                bwrap=self._production_bwrap_payload(),
+                audit=self._audit_payload(external_anchor=False),
+                scan=self._scan_payload(),
+                registry={"status": "pass"},
+                revocation={"status": "pass"},
+                quarantine={"status": "pass"},
+                rollback={"status": "pass"},
+                risk_acceptance={"accepted": True, "accepted_risks": ["AUDIT-ANCHOR"]},
+            )
+        )
+        self.assertEqual(result.decision, NO_GO)
 
     def test_doctor_scanner_missing_is_not_counted_twice(self) -> None:
         result = evaluate_release_gate(
@@ -509,6 +526,29 @@ class ReleaseGateTests(unittest.TestCase):
         self.assertIn("scanner.configured", blocking)
         self.assertIn("scanner.policy", blocking)
 
+    def test_pip_audit_without_license_scan_keeps_license_blocker(self) -> None:
+        scan = self._scan_payload()
+        scan["coverage"] = {
+            "python_dependency_vulnerabilities": True,
+            "license_scan": False,
+        }
+        result = evaluate_release_gate(
+            GateInput(
+                ci={"status": "pass"},
+                doctor={"status": "pass", "production_blocking": False, "checks": []},
+                bwrap=self._production_bwrap_payload(),
+                audit=self._audit_payload(),
+                scan=scan,
+                registry={"status": "pass"},
+                revocation={"status": "pass"},
+                quarantine={"status": "pass"},
+                rollback={"status": "pass"},
+            )
+        )
+        blocking = {item.check_id for item in result.findings if item.production_blocking}
+        self.assertIn("scanner.license", blocking)
+        self.assertNotIn("scanner.policy", blocking)
+
     def test_acceptance_runner_marks_missing_evidence_not_ready(self) -> None:
         args = argparse.Namespace(
             plugins_dir=self.root / "plugins",
@@ -570,6 +610,24 @@ class ReleaseGateTests(unittest.TestCase):
             "production_evidence": True,
             "policy_decision": "pass",
             "status": "pass",
+            "coverage": {
+                "python_dependency_vulnerabilities": True,
+                "license_scan": True,
+            },
+        }
+
+    def _risk_acceptance(self, scope: str) -> dict[str, object]:
+        return {
+            "accepted_risks": [
+                {
+                    "accepted": True,
+                    "accepted_by": "Security Owner",
+                    "role": "security",
+                    "scope": scope,
+                    "expiry": "2099-01-01T00:00:00+00:00",
+                    "compensating_controls": ["restricted pilot scope"],
+                }
+            ]
         }
 
     def _production_bwrap_payload(

@@ -228,6 +228,10 @@ class RcEvidenceToolTests(unittest.TestCase):
             "production_evidence": True,
             "policy_decision": "pass",
             "status": "pass",
+            "coverage": {
+                "python_dependency_vulnerabilities": True,
+                "license_scan": True,
+            },
         }
 
     def _production_bwrap_payload(self) -> dict[str, object]:

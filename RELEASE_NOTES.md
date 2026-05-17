@@ -40,7 +40,7 @@ Plugin output remains untrusted tool result data and must be validated by downst
 
 ## Known Limits
 
-- Release gate remains NO_GO until real scanner evidence and external audit anchor or accepted risk evidence are archived.
+- Release gate remains NO_GO until license scanner evidence and external audit anchor or accepted risk evidence are archived.
 - Windows Job Object is resource limiting only, not complete filesystem/network/syscall isolation.
 - Local audit checkpoint files are not immutable audit storage.
 - Offline scanner adapters are not real vulnerability intelligence.
@@ -75,7 +75,7 @@ after manual file sync, but final archive should use a real tag/commit checkout.
 - `bwrap_validation.json` from `--mode production-required` on a target Linux VM or self-hosted Linux+bwrap runner.
 - Optional `bwrap_diagnostic_github_hosted.json` for hosted runner troubleshooting only.
 - Preflight and stdio worker diagnostics when target Linux+bwrap validation fails before producing sample JSON.
-- Scanner report from the approved scanner.
+- Scanner report from the approved scanner, including license policy coverage.
 - Audit checkpoint verification.
 - Registry, revocation, emergency quarantine, and rollback drill output.
 
@@ -83,7 +83,8 @@ Copied VM evidence status after the diagnostics patch:
 
 - `bwrap.validation`: pass.
 - `registry.verify`, `revocation.drill`, `quarantine.drill`, `rollback.drill`: pass.
-- Release Gate: `NO_GO`. After rc3 CI alignment and blocker classification fixes, expected remaining blockers are real scanner evidence and external audit anchor / controlled risk.
+- Release Gate: `NO_GO`. After rc3 CI alignment, blocker classification fixes, and project-scoped `pip-audit`
+  evidence, expected remaining blockers are license scanner evidence and external audit anchor / controlled risk.
 
 ## Do Not Claim
 

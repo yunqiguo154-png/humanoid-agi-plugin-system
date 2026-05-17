@@ -11,7 +11,13 @@ from typing import Any
 SEVERITIES = {"critical", "high", "medium", "low", "unknown"}
 
 
-def convert_pip_audit_report(payload: dict[str, Any], *, input_file: str | Path) -> dict[str, Any]:
+def convert_pip_audit_report(
+    payload: dict[str, Any],
+    *,
+    input_file: str | Path,
+    scope: str = "project_dependencies",
+    input_type: str = "pip_audit_json",
+) -> dict[str, Any]:
     findings = _findings(payload)
     severity_summary: dict[str, int] = {}
     for finding in findings:
@@ -23,6 +29,8 @@ def convert_pip_audit_report(payload: dict[str, Any], *, input_file: str | Path)
         "scanner_version": _scanner_version(payload),
         "generated_at": datetime.now(UTC).isoformat(),
         "input_file": str(input_file),
+        "input_type": input_type,
+        "scope": scope,
         "findings": findings,
         "severity_summary": severity_summary,
         "policy_decision": policy_decision,
@@ -52,6 +60,8 @@ def malformed_report(*, input_file: str | Path, error: str) -> dict[str, Any]:
         "scanner_version": "unknown",
         "generated_at": datetime.now(UTC).isoformat(),
         "input_file": str(input_file),
+        "input_type": "pip_audit_json",
+        "scope": "project_dependencies",
         "findings": [],
         "severity_summary": {},
         "policy_decision": "fail",
@@ -139,10 +149,17 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Convert pip-audit JSON into Humanoid AGI scanner evidence")
     parser.add_argument("--input", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--scope", default="project_dependencies")
+    parser.add_argument("--input-type", default="pip_audit_json")
     args = parser.parse_args(argv)
 
     try:
-        payload = convert_pip_audit_report(load_pip_audit_report(args.input), input_file=args.input)
+        payload = convert_pip_audit_report(
+            load_pip_audit_report(args.input),
+            input_file=args.input,
+            scope=args.scope,
+            input_type=args.input_type,
+        )
         exit_code = 0 if payload["policy_decision"] == "pass" else 1
     except Exception as exc:
         payload = malformed_report(input_file=args.input, error=f"{type(exc).__name__}: {exc}")

@@ -24,7 +24,7 @@ This file records the current local RC evidence status. Do not treat missing or 
 | Working tree status | Clean at local evidence review. Evidence JSON files are local artifacts and are ignored by Git. |
 | Release candidate tag | `v0.9.0-rc3` candidate only, not GA. |
 | Approver | Missing. No risk acceptance or release approval was provided. |
-| final go/no-go decision | NO_GO. Target Linux+bwrap and rc3 CI passed, but real scanner evidence and external audit anchor or accepted risk are still missing; see `evidence_vm/release_gate.json` in the local evidence archive. |
+| final go/no-go decision | NO_GO. Target Linux+bwrap, rc3 CI, and project-scoped Python dependency vulnerability scanning passed, but license scanning and external audit anchor or accepted risk are still missing; see `evidence_vm/release_gate.json` in the local evidence archive. |
 | Decision timestamp | See `generated_at` in `evidence/release_gate.json`. |
 
 ## Host Evidence
@@ -43,8 +43,9 @@ This file records the current local RC evidence status. Do not treat missing or 
 
 Evidence path: `evidence/doctor.json`.
 
-Current result from target VM: fail / production_blocking. Linux+bwrap now passes, but a real scanner is not configured
-and external audit anchoring is still missing.
+Current result from target VM: fail / production_blocking. Linux+bwrap now passes, but external audit anchoring is still
+missing. Production Doctor may still report scanner configuration as blocking when it is run without scanner evidence;
+Release Gate uses the archived scanner report to classify scanner readiness.
 
 Command:
 
@@ -180,7 +181,11 @@ python scripts/generate_audit_verify_evidence.py --output evidence/audit_verify.
 
 Scanner report path: `evidence/scanner_report.json`.
 
-Current result: Missing. Offline scanner fixture evidence, if present, is only adapter validation and not real vulnerability intelligence. Full `GO` requires a real scanner report from pip-audit, OSV, Safety, Grype, Syft/Grype, or an approved enterprise SCA platform.
+Current result: project-scoped `pip-audit` Python dependency vulnerability scan passed for the direct project
+dependencies and their installed transitive dependency closure. This does not include license scanning and must not be
+treated as a complete vulnerability/license scanner pass. Offline scanner fixture evidence, if present, is only adapter
+validation and not real vulnerability intelligence. Full `GO` requires both real vulnerability evidence and license
+policy evidence from pip-audit plus a license scanner, OSV, Safety, Grype/Syft, or an approved enterprise SCA platform.
 
 Signed registry verification path: `evidence/registry_verify.json`.
 
@@ -189,7 +194,8 @@ controls, not a complete public plugin marketplace.
 
 Required evidence includes scanner report output and signed registry verification.
 
-SBOM/package signature evidence: present in local unit and drill coverage, but production scanner and target-host evidence are still Missing.
+SBOM/package signature evidence: present in local unit and drill coverage. Project-scoped vulnerability scanning is
+present; production license scanner evidence is still Missing.
 
 ## Governance Drills
 
@@ -238,12 +244,12 @@ List accepted risks from `RISK_REGISTER.md`, including owner and expiry/review d
 | `evidence/bwrap_validation.json` | Target Linux VM production-required validation passed in copied local archive `evidence_vm/bwrap_validation.json`; rerun on an aligned `v0.9.0-rc3` checkout for final archive. |
 | `evidence/acceptance_result.json` | not_ready. |
 | `evidence/audit_verify.json` | warn: local hash chain and checkpoint verified, but external append-only/SIEM/WORM anchor is missing and controlled risk is required. |
-| `evidence/scanner_report.json` | missing, production_blocking. |
+| `evidence/scanner_report.json` | project-scoped real `pip-audit` vulnerability evidence passes, but `coverage.license_scan=false`, so license scanner evidence is still blocking. |
 | `evidence/registry_verify.json` | pass in copied VM archive: registry verification drill passed. |
 | `evidence/revocation_drill.json` | pass in copied VM archive: revocation drill passed. |
 | `evidence/quarantine_drill.json` | pass in copied VM archive: quarantine drill passed. |
 | `evidence/rollback_drill.json` | pass in copied VM archive: rollback drill passed. |
-| `evidence/release_gate.json` | NO_GO in copied VM archive. After rc3 CI alignment and Release Gate classification fixes, expected remaining blockers are real scanner evidence and external audit anchor / controlled risk. |
+| `evidence/release_gate.json` | NO_GO in copied VM archive. After project-scoped scanner evidence, expected remaining blockers are external audit anchor / controlled risk and license scanner evidence. |
 
 Windows workstation evidence cannot replace target Linux+bwrap evidence. Local hash chains and local checkpoints cannot
 replace an external append-only/SIEM/WORM audit anchor. Offline scanner fixture output cannot replace real vulnerability
