@@ -35,6 +35,15 @@ python -m coverage run -m unittest discover -s tests
 python -m coverage report
 ```
 
+Each matrix job uploads a non-sensitive artifact named:
+
+```text
+ci-evidence-${{ matrix.os }}-${{ matrix.python-version }}
+```
+
+The artifact contains only `coverage-report.txt` and `ci-evidence-summary.txt`. It must not contain `evidence/*.json`,
+`.env`, private keys, production trust stores, scanner reports, audit logs, or external anchor output.
+
 ## Local Equivalent
 
 ```bash

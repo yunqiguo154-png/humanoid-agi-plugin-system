@@ -6,13 +6,15 @@ This file records the current local RC evidence status. Do not treat missing or 
 
 | Item | Evidence |
 |------|----------|
-| CI run URL | Missing. `gh` CLI was unavailable; see `evidence/ci_result.json`. |
-| Commit SHA | See `evidence/environment.json` generated after the final local RC commit, and verify with `git rev-parse HEAD`. The evidence JSON is intentionally ignored by Git because it is machine-specific. |
+| GitHub remote | `https://github.com/yunqiguo154-png/humanoid-agi-plugin-system.git`. |
+| GitHub push | `main` and `v0.9.0-rc1` were pushed to `origin`. |
+| CI run URL | Missing. `gh` CLI is unavailable locally and hosted workflow results have not been archived yet; see `evidence/ci_result.json` or `evidence/ci_result.missing.json`. |
+| Commit SHA | `f19a44900229d7cb0dc4fe18d9088359271d21bc`. |
 | Branch | `main`. |
-| Working tree status | Clean after the local RC commit. Evidence JSON files are local artifacts and are ignored by Git. |
+| Working tree status | Clean at local evidence review. Evidence JSON files are local artifacts and are ignored by Git. |
 | Release candidate tag | `v0.9.0-rc1` candidate only, not GA. |
 | Approver | Missing. No risk acceptance or release approval was provided. |
-| final go/no-go decision | NO_GO. See `evidence/release_gate.json`. |
+| final go/no-go decision | NO_GO. External production evidence is still missing; see `evidence/release_gate.json`. |
 | Decision timestamp | See `generated_at` in `evidence/release_gate.json`. |
 
 ## Host Evidence
@@ -31,7 +33,8 @@ This file records the current local RC evidence status. Do not treat missing or 
 
 Evidence path: `evidence/doctor.json`.
 
-Current result: fail / production_blocking. Windows is not a strong sandbox and scanner is not configured.
+Current result: fail / production_blocking. Windows is not a strong sandbox, target Linux+bwrap evidence is missing,
+and a real scanner is not configured.
 
 Command:
 
@@ -68,11 +71,44 @@ Command:
 python scripts/validate_bwrap_sandbox.py --json
 ```
 
+Target Linux validation commands:
+
+```bash
+git clone https://github.com/yunqiguo154-png/humanoid-agi-plugin-system.git
+cd humanoid-agi-plugin-system
+git checkout v0.9.0-rc1
+git rev-parse HEAD
+git branch --show-current
+python3 --version
+uname -a
+bwrap --version
+python3 -m pip install -e ".[dev]"
+python3 -m unittest discover -s tests
+python3 -m ruff check .
+python3 -m mypy .
+python3 -m coverage run -m unittest discover -s tests
+python3 -m coverage report
+plugin-cli doctor --production --json > evidence/doctor.json
+python3 scripts/validate_bwrap_sandbox.py --json > evidence/bwrap_validation.json
+python3 scripts/run_production_acceptance.py --json --output evidence/acceptance_result.json
+```
+
+If `bubblewrap` is missing on Debian or Ubuntu hosts:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y bubblewrap
+```
+
+The target archive must record Linux distribution, kernel, `bwrap --version`, Python version, commit SHA, and tag.
+Windows local evidence cannot replace Linux+bwrap validation. A skipped bwrap validation is not a pass.
+
 ## Audit Evidence
 
 Local audit evidence path: `evidence/audit_verify.json`.
 
-Current result: local hash chain and local checkpoint verified, but `external_anchor_configured=false` and `production_immutability=false`.
+Current result: Missing for this evidence bundle because no audit log path was provided to the collector. Local hash
+chain and checkpoint tests exist, but they do not prove immutable audit retention.
 
 External append-only anchor evidence: Missing. See `evidence/audit_anchor_verify.json`.
 
@@ -86,7 +122,7 @@ plugin-cli audit verify --log <audit.log> --checkpoint <checkpoint.json>
 
 Scanner report path: `evidence/scanner_report.json`.
 
-Current result: Missing. Offline scanner fixture evidence, if present, is only adapter validation and not real vulnerability intelligence.
+Current result: Missing. Offline scanner fixture evidence, if present, is only adapter validation and not real vulnerability intelligence. Full `GO` requires a real scanner report from pip-audit, OSV, Safety, Grype, Syft/Grype, or an approved enterprise SCA platform.
 
 Signed registry verification path: `evidence/registry_verify.json`.
 
@@ -95,7 +131,7 @@ controls, not a complete public plugin marketplace.
 
 Required evidence includes scanner report output and signed registry verification.
 
-SBOM/package signature evidence: Missing for this RC evidence bundle.
+SBOM/package signature evidence: present in local unit and drill coverage, but production scanner and target-host evidence are still Missing.
 
 ## Governance Drills
 
@@ -142,12 +178,12 @@ List accepted risks from `RISK_REGISTER.md`, including owner and expiry/review d
 | `evidence/doctor.json` | fail, production_blocking. |
 | `evidence/bwrap_validation.json` | skipped, production_blocking for full production. |
 | `evidence/acceptance_result.json` | not_ready. |
-| `evidence/audit_verify.json` | warn/fail for production because no external anchor. |
+| `evidence/audit_verify.json` | missing/fail for production because no audit log path or external anchor was provided. |
 | `evidence/scanner_report.json` | missing, production_blocking. |
-| `evidence/registry_verify.json` | required; missing or failed is production_blocking. |
-| `evidence/revocation_drill.json` | required; missing or failed is production_blocking. |
-| `evidence/quarantine_drill.json` | required; missing or failed is production_blocking. |
-| `evidence/rollback_drill.json` | required; missing or failed is production_blocking. |
+| `evidence/registry_verify.json` | pass locally: signed index, package sha256, unsigned registry rejection, tampered registry rejection. |
+| `evidence/revocation_drill.json` | pass locally: revoked signer key, revoked plugin version, installed revoked plugin denial, audit event. |
+| `evidence/quarantine_drill.json` | pass locally: admin quarantine, future call denial, audit event, visible status update. |
+| `evidence/rollback_drill.json` | pass locally: failed update rollback, downgrade rejection, same-version replacement rejection, audit event. |
 | `evidence/release_gate.json` | NO_GO. |
 
 Windows workstation evidence cannot replace target Linux+bwrap evidence. Local hash chains and local checkpoints cannot

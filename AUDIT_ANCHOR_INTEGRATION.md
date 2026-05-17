@@ -57,3 +57,12 @@ plugin-cli audit status --log data/plugins/audit.log --checkpoint data/plugins/a
 ```
 
 Local checkpoints are useful for tests and deployment smoke checks. They are not a substitute for an external append-only anchor.
+
+## RC-1 Evidence Rule
+
+For `v0.9.0-rc1`, local audit hash chain and checkpoint verification can show local tamper evidence for edited,
+truncated, or rolled-back files. They cannot prove immutable audit retention if an administrator can delete or replace
+the whole log and checkpoint set. Full `GO` requires an external append-only anchor such as SIEM, WORM storage,
+append-only object storage, a transparency log, or external timestamping. Without that external anchor, the release
+gate may only reach `CONTROLLED_GO` when a formal, time-bound accepted risk is recorded with owner, scope,
+expiration date, and compensating controls.

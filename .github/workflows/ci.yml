@@ -42,4 +42,31 @@ jobs:
         run: python -m coverage run -m unittest discover -s tests
 
       - name: Coverage report
-        run: python -m coverage report
+        shell: pwsh
+        run: |
+          python -m coverage report | Tee-Object -FilePath coverage-report.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Write CI evidence summary
+        shell: pwsh
+        run: |
+          @"
+          workflow=${{ github.workflow }}
+          run_id=${{ github.run_id }}
+          run_attempt=${{ github.run_attempt }}
+          head_sha=${{ github.sha }}
+          ref=${{ github.ref }}
+          runner_os=${{ runner.os }}
+          matrix_os=${{ matrix.os }}
+          python_version=${{ matrix.python-version }}
+          "@ | Out-File -FilePath ci-evidence-summary.txt -Encoding utf8
+
+      - name: Upload CI evidence summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-evidence-${{ matrix.os }}-${{ matrix.python-version }}
+          path: |
+            coverage-report.txt
+            ci-evidence-summary.txt
+          if-no-files-found: error
+          retention-days: 14

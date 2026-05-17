@@ -82,3 +82,11 @@ plugin-cli --production policy check dist/plugin.zip \
 ```
 
 The built-in offline command is a contract check. Replace it with a production scanner report before release approval.
+
+## RC-1 Evidence Rule
+
+For `v0.9.0-rc1`, offline scanner output can only prove the adapter contract and fail-closed policy path. It is not
+real vulnerability or license intelligence. Full `GO` requires a real scanner report from pip-audit, OSV, Safety,
+Grype, Syft/Grype, or an approved enterprise SCA platform. If a real scanner is temporarily unavailable, the release
+gate may only reach `CONTROLLED_GO` when a formal, time-bound accepted risk is recorded with owner, scope,
+expiration date, and compensating controls.

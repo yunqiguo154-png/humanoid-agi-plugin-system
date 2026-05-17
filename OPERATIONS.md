@@ -160,6 +160,42 @@ Next external acceptance steps for `v0.9.0-rc1`:
 5. Connect an external append-only/SIEM/WORM audit anchor; otherwise record a formal accepted risk for a controlled pilot.
 6. Re-run `scripts/collect_rc_evidence.py` and `scripts/release_gate.py` with the external evidence paths.
 
+Target Linux+bwrap validation commands:
+
+```bash
+git clone https://github.com/yunqiguo154-png/humanoid-agi-plugin-system.git
+cd humanoid-agi-plugin-system
+git checkout v0.9.0-rc1
+
+git rev-parse HEAD
+git branch --show-current
+python3 --version
+uname -a
+bwrap --version
+
+python3 -m pip install -e ".[dev]"
+python3 -m unittest discover -s tests
+python3 -m ruff check .
+python3 -m mypy .
+python3 -m coverage run -m unittest discover -s tests
+python3 -m coverage report
+
+mkdir -p evidence
+plugin-cli doctor --production --json > evidence/doctor.json
+python3 scripts/validate_bwrap_sandbox.py --json > evidence/bwrap_validation.json
+python3 scripts/run_production_acceptance.py --json --output evidence/acceptance_result.json
+```
+
+If `bubblewrap` is missing on Debian or Ubuntu hosts:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y bubblewrap
+```
+
+Record the Linux distribution, kernel, `bwrap --version`, Python version, commit SHA, and tag in the acceptance archive.
+Windows local evidence cannot replace this target Linux+bwrap validation. A skipped bwrap validation is not a pass.
+
 The legacy compatibility layer is not a production plugin execution path. Legacy `plugins/<name>/metadata.json + plugin.py` loading is development-only and is rejected in production mode. Migrate legacy plugins using `MIGRATION_GUIDE.md`.
 
 ## Governance Workflows
