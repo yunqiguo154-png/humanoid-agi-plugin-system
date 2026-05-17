@@ -454,21 +454,7 @@ def _probe_bubblewrap(binary: str) -> dict[str, Any]:
     true_binary = Path("/usr/bin/true") if Path("/usr/bin/true").exists() else Path("/bin/true")
     if not true_binary.exists():
         return {"ok": False, "error": "true executable not found"}
-    command = [
-        binary,
-        "--die-with-parent",
-        "--unshare-user",
-        "--unshare-pid",
-        "--unshare-ipc",
-        "--unshare-net",
-        "--unshare-uts",
-        "--new-session",
-        "--ro-bind",
-        str(true_binary),
-        str(true_binary),
-        "--",
-        str(true_binary),
-    ]
+    command = _bubblewrap_probe_command(binary, true_binary)
     try:
         result = subprocess.run(
             command,
@@ -486,6 +472,58 @@ def _probe_bubblewrap(binary: str) -> dict[str, Any]:
             "error": (result.stderr or result.stdout or f"exit {result.returncode}").strip(),
         }
     return {"ok": True}
+
+
+def _bubblewrap_probe_command(binary: str, true_binary: Path) -> list[str]:
+    readonly_system_paths = _dedupe_existing_paths(
+        [
+            Path("/usr"),
+            Path("/bin"),
+            Path("/lib"),
+            Path("/lib64"),
+            Path("/etc/ssl"),
+            Path("/etc/ca-certificates"),
+        ]
+    )
+    command = [
+        binary,
+        "--die-with-parent",
+        "--unshare-user",
+        "--unshare-pid",
+        "--unshare-ipc",
+        "--unshare-net",
+        "--unshare-uts",
+        "--new-session",
+        "--proc",
+        "/proc",
+        "--dev",
+        "/dev",
+        "--tmpfs",
+        "/tmp",
+        "--clearenv",
+    ]
+    for bind_path in readonly_system_paths:
+        command.extend(["--ro-bind", str(bind_path), str(bind_path)])
+    command.extend(
+        [
+            "--setenv",
+            "PATH",
+            "/usr/local/bin:/usr/bin:/bin",
+            "--setenv",
+            "HOME",
+            "/tmp",
+            "--setenv",
+            "TMPDIR",
+            "/tmp",
+        ]
+    )
+    command.extend(
+        [
+            "--",
+            str(true_binary),
+        ]
+    )
+    return command
 
 
 def _prepare_runtime_package(project_root: Path, runtime_root: Path) -> Path:

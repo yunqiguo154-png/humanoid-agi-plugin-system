@@ -15,6 +15,7 @@ import uuid
 import zipfile
 import sys
 from pathlib import Path
+from pathlib import PurePosixPath
 from urllib.error import HTTPError
 from unittest.mock import patch
 
@@ -44,6 +45,7 @@ from modules.plugin_system.sandbox import SandboxManager, SandboxStartupError, S
 from modules.plugin_system.sandbox_backend import (
     EXTERNAL_SANDBOX_ATTESTATION_ENV,
     BubblewrapBackend,
+    _bubblewrap_probe_command,
     create_sandbox_backend,
 )
 from modules.plugin_system.signing import (
@@ -2497,6 +2499,25 @@ class PluginSystemTests(unittest.TestCase):
         self.assertEqual(backend.report.details["home"], str(plugin_dir / "data"))
         self.assertIn("_sandbox_runtime", backend.report.details["pythonpath"])
         self.assertNotIn(str(Path.cwd()), backend.report.details["readonly_binds"])
+
+    def test_bubblewrap_probe_binds_system_runtime_paths(self) -> None:
+        with patch(
+            "modules.plugin_system.sandbox_backend._dedupe_existing_paths",
+            return_value=[
+                PurePosixPath("/usr"),
+                PurePosixPath("/bin"),
+                PurePosixPath("/lib"),
+                PurePosixPath("/lib64"),
+            ],
+        ):
+            command = _bubblewrap_probe_command("/usr/bin/bwrap", Path("/usr/bin/true"))
+        self.assertIn("--unshare-user", command)
+        self.assertIn("--unshare-net", command)
+        self.assertIn("--tmpfs", command)
+        self.assertIn("--clearenv", command)
+        self.assertIn("--ro-bind", command)
+        self.assertIn("/usr", command)
+        self.assertEqual(command[-2], "--")
 
     def test_auto_backend_prefers_bubblewrap_on_linux(self) -> None:
         with patch("modules.plugin_system.sandbox_backend.sys.platform", "linux"), patch(
