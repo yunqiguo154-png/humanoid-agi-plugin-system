@@ -13,6 +13,7 @@ from scripts.drill_quarantine import run_drill as run_quarantine_drill
 from scripts.drill_registry_verify import run_drill as run_registry_drill
 from scripts.drill_revocation import run_drill as run_revocation_drill
 from scripts.drill_rollback import run_drill as run_rollback_drill
+from scripts.generate_audit_verify_evidence import generate_evidence, verify_local_audit_pair
 from tests.test_utils import make_test_root
 
 
@@ -100,6 +101,42 @@ class RcEvidenceToolTests(unittest.TestCase):
             )
         )
         self.assertEqual(result.decision, GO)
+
+    def test_generate_audit_verify_evidence_json_schema(self) -> None:
+        output = self.root / "evidence" / "audit_verify.json"
+        payload = generate_evidence(output=output)
+
+        self.assertTrue(output.exists())
+        self.assertEqual(payload["status"], "warn")
+        self.assertTrue(payload["hash_chain_verified"])
+        self.assertTrue(payload["checkpoint_verified"])
+        self.assertTrue(payload["rollback_detection_available"])
+        self.assertFalse(payload["external_anchor_configured"])
+        self.assertFalse(payload["production_immutability"])
+        self.assertTrue(payload["controlled_risk_required"])
+        self.assertTrue(payload["production_blocking"])
+        for key in [
+            "audit_log_path",
+            "checkpoint_path",
+            "reason",
+            "recommendation",
+            "generated_at",
+        ]:
+            self.assertIn(key, payload)
+
+    def test_generate_audit_verify_evidence_detects_tampering(self) -> None:
+        output = self.root / "evidence" / "audit_verify.json"
+        payload = generate_evidence(output=output)
+        audit_log = Path(str(payload["audit_log_path"]))
+        checkpoint = Path(str(payload["checkpoint_path"]))
+
+        content = audit_log.read_text(encoding="utf-8")
+        audit_log.write_text(content.replace("audit.evidence.verify", "audit.evidence.tamper"), encoding="utf-8")
+
+        tampered = verify_local_audit_pair(audit_log, checkpoint)
+        self.assertFalse(tampered["hash_chain_verified"])
+        self.assertFalse(tampered["checkpoint_verified"])
+        self.assertIn("hash", str(tampered["error"]))
 
     def _assert_drill_schema(self, payload: dict[str, object], drill_id: str) -> None:
         required = {

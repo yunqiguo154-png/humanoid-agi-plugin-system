@@ -2,9 +2,16 @@
 
 ## Suggested Version
 
-`v0.9.0-rc1`
+`v0.9.0-rc2`
 
 Do not mark this as `v1.0.0` GA until the external production acceptance items are completed and archived.
+
+## RC Tags
+
+- `v0.9.0-rc1`: local RC freeze point.
+- `v0.9.0-rc2`: CI evidence archival and external validation preparation point.
+- Post-RC2 `main` adds local audit verify evidence tooling. Do not move `v0.9.0-rc2`; create a later RC tag if this tooling should be part of a tagged validation run.
+- Current status remains RC, not GA.
 
 ## Current Capability
 
@@ -21,7 +28,7 @@ Do not mark this as `v1.0.0` GA until the external production acceptance items a
 - JSONL audit hash chain with checkpoint anchor interface.
 - Disable, quarantine, revoke, revoked key, and revoked plugin version controls.
 - CI workflow for Linux/Windows and Python 3.11/3.12/3.13.
-- RC evidence tooling: local evidence collector plus registry, revocation, quarantine, and rollback drill runners.
+- RC evidence tooling: local evidence collector, local audit verify evidence helper, plus registry, revocation, quarantine, and rollback drill runners.
 
 ## Security Boundary
 
@@ -31,7 +38,7 @@ Plugin output remains untrusted tool result data and must be validated by downst
 
 ## Known Limits
 
-- RC-1 release gate remains NO_GO until external CI, target Linux+bwrap, real scanner, external audit anchor, and required drill evidence are archived.
+- RC-2 release gate remains NO_GO until current-head CI, target Linux+bwrap, real scanner, external audit anchor, and required drill evidence are archived.
 - Windows Job Object is resource limiting only, not complete filesystem/network/syscall isolation.
 - Local audit checkpoint files are not immutable audit storage.
 - Offline scanner adapters are not real vulnerability intelligence.
@@ -55,7 +62,8 @@ Plugin output remains untrusted tool result data and must be validated by downst
 
 ## Production Pilot Recommendation
 
-Run RC-1 first on a Linux host class with bubblewrap installed. Archive:
+Run RC-2 first on a Linux host class with bubblewrap installed. If using the post-RC2 audit evidence helper, validate
+from a later commit or tag that contains `scripts/generate_audit_verify_evidence.py`. Archive:
 
 - GitHub Actions matrix URL.
 - `acceptance_result.json`.

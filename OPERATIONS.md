@@ -62,6 +62,7 @@ Verify a local audit hash chain:
 
 ```bash
 plugin-cli audit verify --log data/plugins/audit.log
+python scripts/generate_audit_verify_evidence.py --output evidence/audit_verify.json
 ```
 
 Create and verify a local checkpoint:
@@ -151,7 +152,7 @@ python scripts/release_gate.py \
 Missing registry, revocation, quarantine, or rollback drill evidence is production-blocking. Passing local drills does not
 replace target Linux+bwrap validation, real scanner evidence, or external immutable audit anchoring.
 
-Next external acceptance steps for `v0.9.0-rc1`:
+Next external acceptance steps for `v0.9.0-rc2`:
 
 1. Push the RC commit and tag to GitHub.
 2. Run GitHub Actions and archive the workflow run URL, head SHA, matrix jobs, ruff, mypy, unittest, and coverage result.
@@ -162,18 +163,24 @@ Next external acceptance steps for `v0.9.0-rc1`:
 
 Target Linux+bwrap validation commands:
 
+Note: `scripts/generate_audit_verify_evidence.py` was added after the existing `v0.9.0-rc2` tag. Do not move that tag.
+Use current `main` after this documentation/tooling commit, or create a later RC tag, if the local audit evidence helper
+must be part of the tagged validation run.
+
 ```bash
 git clone https://github.com/yunqiguo154-png/humanoid-agi-plugin-system.git
 cd humanoid-agi-plugin-system
-git checkout v0.9.0-rc1
+git checkout v0.9.0-rc2
 
 git rev-parse HEAD
 git branch --show-current
 python3 --version
 uname -a
-bwrap --version
 
 python3 -m pip install -e ".[dev]"
+sudo apt-get update
+sudo apt-get install -y bubblewrap
+bwrap --version
 python3 -m unittest discover -s tests
 python3 -m ruff check .
 python3 -m mypy .
@@ -184,6 +191,8 @@ mkdir -p evidence
 plugin-cli doctor --production --json > evidence/doctor.json
 python3 scripts/validate_bwrap_sandbox.py --json > evidence/bwrap_validation.json
 python3 scripts/run_production_acceptance.py --json --output evidence/acceptance_result.json
+python3 scripts/generate_audit_verify_evidence.py --output evidence/audit_verify.json  # requires post-RC2 main or a later RC tag
+python3 scripts/release_gate.py --json > evidence/release_gate.json
 ```
 
 If `bubblewrap` is missing on Debian or Ubuntu hosts:
@@ -194,7 +203,10 @@ sudo apt-get install -y bubblewrap
 ```
 
 Record the Linux distribution, kernel, `bwrap --version`, Python version, commit SHA, and tag in the acceptance archive.
-Windows local evidence cannot replace this target Linux+bwrap validation. A skipped bwrap validation is not a pass.
+Windows local evidence cannot replace this target Linux+bwrap validation. GitHub Actions Ubuntu also does not fully
+replace validation on the target production Linux host class. A skipped bwrap validation is not a pass.
+Scanner evidence and an external append-only/SIEM/WORM audit anchor still require real external evidence or formal risk
+acceptance before a controlled production pilot.
 
 The legacy compatibility layer is not a production plugin execution path. Legacy `plugins/<name>/metadata.json + plugin.py` loading is development-only and is rejected in production mode. Migrate legacy plugins using `MIGRATION_GUIDE.md`.
 

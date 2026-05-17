@@ -7,18 +7,21 @@ This file records the current local RC evidence status. Do not treat missing or 
 | Item | Evidence |
 |------|----------|
 | GitHub remote | `https://github.com/yunqiguo154-png/humanoid-agi-plugin-system.git`. |
-| GitHub push | `main` and `v0.9.0-rc1` were pushed to `origin`. |
-| GitHub Actions | Pass. |
-| CI run URL | `https://github.com/yunqiguo154-png/humanoid-agi-plugin-system/actions/runs/25985684158`. |
-| GitHub Actions run URL | `https://github.com/yunqiguo154-png/humanoid-agi-plugin-system/actions/runs/25985684158`. |
-| CI matrix | Pass: ubuntu-latest Python 3.11 / 3.12 / 3.13 and windows-latest Python 3.11 / 3.12 / 3.13. |
-| CI quality checks | Pass: unittest, ruff, mypy, and coverage. |
-| Coverage | 71%. |
-| CI evidence head SHA | `36e4fcd51209a05f6ca5902c53970ab4edebf601`. |
-| Commit SHA | `36e4fcd51209a05f6ca5902c53970ab4edebf601` at CI evidence capture. |
+| GitHub push | `main`, `v0.9.0-rc1`, and `v0.9.0-rc2` were pushed to `origin`. |
+| Recommended validation tag | `v0.9.0-rc2`. |
+| Historical RC tag | `v0.9.0-rc1` remains the local RC freeze point and was not moved. |
+| Post-RC2 note | This document revision adds local audit evidence helper instructions after `v0.9.0-rc2`; do not move the tag. Create `v0.9.0-rc3` if these changes should be part of a tagged validation run. |
+| GitHub Actions | Stale for current HEAD. The archived run passed for an older commit and must not be treated as current HEAD CI evidence. |
+| CI run URL | `https://github.com/yunqiguo154-png/humanoid-agi-plugin-system/actions/runs/25985684158` for stale head `36e4fcd51209a05f6ca5902c53970ab4edebf601`. |
+| GitHub Actions run URL | `https://github.com/yunqiguo154-png/humanoid-agi-plugin-system/actions/runs/25985684158` for stale head `36e4fcd51209a05f6ca5902c53970ab4edebf601`. |
+| CI matrix | Stale. The recorded run passed ubuntu-latest Python 3.11 / 3.12 / 3.13 and windows-latest Python 3.11 / 3.12 / 3.13 for the older CI evidence head. |
+| CI quality checks | Stale. The recorded run passed unittest, ruff, mypy, and coverage for the older CI evidence head. |
+| Coverage | 71% in stale CI evidence. |
+| CI evidence head SHA | `36e4fcd51209a05f6ca5902c53970ab4edebf601`; current HEAD is `7b0aa53773aef957a98c610967a5469cec962848`. |
+| Commit SHA | `7b0aa53773aef957a98c610967a5469cec962848` before RC2 validation documentation changes. |
 | Branch | `main`. |
 | Working tree status | Clean at local evidence review. Evidence JSON files are local artifacts and are ignored by Git. |
-| Release candidate tag | `v0.9.0-rc1` candidate only, not GA. |
+| Release candidate tag | `v0.9.0-rc2` candidate only, not GA. |
 | Approver | Missing. No risk acceptance or release approval was provided. |
 | final go/no-go decision | NO_GO. External production evidence is still missing; see `evidence/release_gate.json`. |
 | Decision timestamp | See `generated_at` in `evidence/release_gate.json`. |
@@ -82,21 +85,26 @@ Target Linux validation commands:
 ```bash
 git clone https://github.com/yunqiguo154-png/humanoid-agi-plugin-system.git
 cd humanoid-agi-plugin-system
-git checkout v0.9.0-rc1
+git checkout v0.9.0-rc2
 git rev-parse HEAD
 git branch --show-current
 python3 --version
 uname -a
-bwrap --version
 python3 -m pip install -e ".[dev]"
+sudo apt-get update
+sudo apt-get install -y bubblewrap
+bwrap --version
 python3 -m unittest discover -s tests
 python3 -m ruff check .
 python3 -m mypy .
 python3 -m coverage run -m unittest discover -s tests
 python3 -m coverage report
+mkdir -p evidence
 plugin-cli doctor --production --json > evidence/doctor.json
 python3 scripts/validate_bwrap_sandbox.py --json > evidence/bwrap_validation.json
 python3 scripts/run_production_acceptance.py --json --output evidence/acceptance_result.json
+python3 scripts/generate_audit_verify_evidence.py --output evidence/audit_verify.json  # requires post-RC2 main or a later RC tag
+python3 scripts/release_gate.py --json > evidence/release_gate.json
 ```
 
 If `bubblewrap` is missing on Debian or Ubuntu hosts:
@@ -107,14 +115,16 @@ sudo apt-get install -y bubblewrap
 ```
 
 The target archive must record Linux distribution, kernel, `bwrap --version`, Python version, commit SHA, and tag.
-Windows local evidence cannot replace Linux+bwrap validation. A skipped bwrap validation is not a pass.
+Windows local evidence cannot replace Linux+bwrap validation. GitHub Actions Ubuntu cannot fully replace validation on the
+target production Linux host class. A skipped bwrap validation is not a pass.
 
 ## Audit Evidence
 
 Local audit evidence path: `evidence/audit_verify.json`.
 
-Current result: Missing for this evidence bundle because no audit log path was provided to the collector. Local hash
-chain and checkpoint tests exist, but they do not prove immutable audit retention.
+Current result: local audit hash chain and checkpoint evidence can be generated with
+`scripts/generate_audit_verify_evidence.py`. This removes the local missing-evidence gap only; it does not prove
+immutable audit retention and still requires an external anchor or formal accepted risk.
 
 External append-only anchor evidence: Missing. See `evidence/audit_anchor_verify.json`.
 
@@ -122,6 +132,7 @@ Command:
 
 ```bash
 plugin-cli audit verify --log <audit.log> --checkpoint <checkpoint.json>
+python scripts/generate_audit_verify_evidence.py --output evidence/audit_verify.json
 ```
 
 ## Supply Chain Evidence
@@ -180,11 +191,11 @@ List accepted risks from `RISK_REGISTER.md`, including owner and expiry/review d
 | --- | --- |
 | `evidence/environment.json` | warn because this is a Windows workstation, not target Linux+bwrap production evidence. |
 | `evidence/local_quality_gate.json` | pass locally: unittest, ruff, mypy, coverage 71%. |
-| `evidence/ci_result.json` | pass, manually recorded from GitHub Actions Web UI run `25985684158`; matrix and quality checks passed with 71% coverage. |
+| `evidence/ci_result.json` | stale for current HEAD. The recorded run passed older head `36e4fcd51209a05f6ca5902c53970ab4edebf601`; current HEAD was `7b0aa53773aef957a98c610967a5469cec962848` before this documentation/tooling update. |
 | `evidence/doctor.json` | fail, production_blocking. |
 | `evidence/bwrap_validation.json` | skipped, production_blocking for full production. |
 | `evidence/acceptance_result.json` | not_ready. |
-| `evidence/audit_verify.json` | missing/fail for production because no audit log path or external anchor was provided. |
+| `evidence/audit_verify.json` | warn: local hash chain and checkpoint verified, but external append-only/SIEM/WORM anchor is missing and controlled risk is required. |
 | `evidence/scanner_report.json` | missing, production_blocking. |
 | `evidence/registry_verify.json` | pass locally: signed index, package sha256, unsigned registry rejection, tampered registry rejection. |
 | `evidence/revocation_drill.json` | pass locally: revoked signer key, revoked plugin version, installed revoked plugin denial, audit event. |
@@ -194,4 +205,5 @@ List accepted risks from `RISK_REGISTER.md`, including owner and expiry/review d
 
 Windows workstation evidence cannot replace target Linux+bwrap evidence. Local hash chains and local checkpoints cannot
 replace an external append-only/SIEM/WORM audit anchor. Offline scanner fixture output cannot replace real vulnerability
-intelligence. The release remains `v0.9.0-rc1`, not GA.
+intelligence. GitHub Actions Ubuntu cannot fully replace target production Linux host validation. The release remains
+`v0.9.0-rc2`, not GA.
