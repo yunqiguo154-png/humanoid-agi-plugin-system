@@ -126,11 +126,16 @@ jobs:
           } > evidence/linux_environment.txt
 
       - name: Run production doctor
-        run: plugin-cli doctor --production --json > evidence/doctor.json
+        run: plugin-cli --production doctor --json > evidence/doctor.json
         continue-on-error: true
 
       - name: Run bwrap sandbox validation
-        run: python scripts/validate_bwrap_sandbox.py --json > evidence/bwrap_validation.json
+        run: |
+          set +e
+          python scripts/validate_bwrap_sandbox.py --json > evidence/bwrap_validation.json
+          status=$?
+          cat evidence/bwrap_validation.json
+          exit "$status"
 
       - name: Run acceptance evidence collection
         run: python scripts/run_production_acceptance.py --json --output evidence/acceptance_result.json
@@ -144,6 +149,7 @@ jobs:
         continue-on-error: true
 
       - name: Upload Linux bwrap evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: linux-bwrap-evidence-${{ github.sha }}
