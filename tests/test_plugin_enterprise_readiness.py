@@ -31,7 +31,9 @@ from modules.plugin_system.scanner import (
 )
 from modules.plugin_system.signing import generate_keypair, sign_package, verify_signature
 from modules.plugin_system.sbom import write_sbom
-from scripts.validate_bwrap_sandbox import run_validation
+from scripts.validate_bwrap_sandbox import _evaluate_result, _make_malicious_plugin, run_validation
+from modules.plugin_system.loader import PluginLoader
+from modules.plugin_system.sandbox import scan_plugin_source
 from tests.test_utils import make_test_root
 
 
@@ -442,6 +444,39 @@ class EnterpriseReadinessTests(unittest.TestCase):
         with patch("scripts.validate_bwrap_sandbox.sys.platform", "win32"):
             report = run_validation(self.root / "validation")
         self.assertEqual(report["status"], "skipped")
+
+    def test_bwrap_validation_sample_passes_static_scan(self) -> None:
+        source = _make_malicious_plugin(self.root, self.root / ".env", self.root / "home.secret")
+        metadata = PluginLoader(self.root / "plugins").read_metadata(source / "plugin.yaml")
+        self.assertEqual(scan_plugin_source(source, metadata), [])
+
+    def test_bwrap_validation_requires_enforced_backend_details(self) -> None:
+        class EmptyAudit:
+            def read_records(self) -> list[object]:
+                return [{}]
+
+        result = {
+            "status": "success",
+            "data": {
+                "home_readable": False,
+                "env_readable": False,
+                "core_readable": False,
+                "code_writable": False,
+                "host_tmp_write": True,
+                "direct_network_available": False,
+                "process_execution_available": False,
+                "data_content": "data-ok",
+            },
+        }
+        checks = _evaluate_result(  # type: ignore[arg-type]
+            result,
+            EmptyAudit(),
+            {"sandbox_backend": {"enforced": False, "details": {}}},
+            {"host_tmp_leaked": False},
+        )
+        statuses = {item["check_id"]: item["status"] for item in checks}
+        self.assertEqual(statuses["bwrap_backend_enforced"], "fail")
+        self.assertEqual(statuses["bwrap_wrapped_command"], "fail")
 
     def test_rc1_docs_and_scripts_exist(self) -> None:
         expected = {

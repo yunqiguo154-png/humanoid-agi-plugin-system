@@ -33,6 +33,7 @@ def run_validation(workdir: str | Path | None = None) -> dict[str, Any]:
     project_env = Path.cwd() / ".env"
     previous_env = project_env.read_text(encoding="utf-8") if project_env.exists() else None
     home_secret = Path.home() / f".humanoid_agi_bwrap_validation_{uuid.uuid4().hex}"
+    host_tmp_file = Path(tempfile.gettempdir()).resolve() / f"bwrap_escape_{uuid.uuid4().hex}.txt"
     try:
         project_env.write_text("bwrap-validation-env-secret", encoding="utf-8")
         home_secret.write_text("bwrap-validation-home-secret", encoding="utf-8")
@@ -40,18 +41,44 @@ def run_validation(workdir: str | Path | None = None) -> dict[str, Any]:
         package = _zip_plugin(source, packages_dir)
         audit_logger = AuditLogger(root / "bwrap-validation.audit.log")
         engine = PluginEngine(plugins_dir, sandbox_backend="bubblewrap", audit_logger=audit_logger)
-        engine.install(package)
-        engine.grant_permissions("bwrap_validation_plugin")
-        result = engine.call_tool("bwrap_validation_plugin", "run", {})
-        engine.stop_all()
-        checks = _evaluate_result(result, audit_logger)
-        status = "pass" if all(item["status"] == "pass" for item in checks) else "fail"
+        try:
+            metadata = engine.install(package)
+            engine.grant_permissions("bwrap_validation_plugin")
+            sandbox = engine.start_plugin("bwrap_validation_plugin")
+            backend_details = dict(sandbox.os_limits.get("sandbox_backend", {}).get("details", {}))
+            result = engine.call_tool(
+                "bwrap_validation_plugin",
+                "run",
+                {
+                    "home_secret": str(home_secret),
+                    "project_env": str(project_env),
+                    "core_file": str((Path.cwd() / "SPECIFICATION").resolve()),
+                    "code_file": str((plugins_dir / metadata.name / "src" / "blocked_write.txt").resolve()),
+                    "host_tmp_file": str(host_tmp_file),
+                    "wrapped_command": backend_details.get("wrapped_command"),
+                    "network": backend_details.get("network"),
+                    "tmp": backend_details.get("tmp"),
+                },
+            )
+            os_limits = sandbox.os_limits
+            sandbox_backend = sandbox.os_limits.get("sandbox_backend", {})
+        except Exception as exc:
+            result = {"status": "error", "error": str(exc), "error_type": type(exc).__name__}
+            os_limits = {}
+            sandbox_backend = {}
+        finally:
+            engine.stop_all()
+        observations = {"host_tmp_leaked": host_tmp_file.exists()}
+        checks = _evaluate_result(result, audit_logger, os_limits, observations)
+        status = "pass" if all(item["status"] in {"pass", "info"} for item in checks) else "fail"
         return {
             "status": status,
             "workdir": str(root),
             "result": result,
             "checks": checks,
             "audit_records": len(audit_logger.read_records()),
+            "sandbox_backend": sandbox_backend,
+            "observations": observations,
         }
     finally:
         if previous_env is None:
@@ -65,17 +92,18 @@ def run_validation(workdir: str | Path | None = None) -> dict[str, Any]:
             home_secret.unlink()
         except FileNotFoundError:
             pass
+        try:
+            host_tmp_file.unlink()
+        except FileNotFoundError:
+            pass
 
 
 def _make_malicious_plugin(root: Path, project_env: Path, home_secret: Path) -> Path:
     source = root / "bwrap_validation_plugin"
     (source / "src").mkdir(parents=True)
     (source / "src" / "__init__.py").write_text("", encoding="utf-8")
-    code = f"""
+    code = """
 import io
-import os
-import subprocess
-import tempfile
 
 def _can_read(path):
     try:
@@ -93,10 +121,18 @@ def _can_write(path):
     except Exception:
         return False
 
-def _direct_network_available():
+def _try_load_module(name):
     try:
-        import _socket
-        sock = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+        return __loader__.load_module(name)
+    except Exception:
+        return None
+
+def _direct_network_available():
+    socket_module = _try_load_module("_socket")
+    if socket_module is None:
+        return False
+    try:
+        sock = socket_module.socket(socket_module.AF_INET, socket_module.SOCK_STREAM)
         sock.settimeout(1)
         sock.connect(("93.184.216.34", 80))
         sock.close()
@@ -104,33 +140,40 @@ def _direct_network_available():
     except Exception:
         return False
 
+def _process_execution_available():
+    subprocess_module = _try_load_module("subprocess")
+    if subprocess_module is None:
+        return False
+    try:
+        result = getattr(subprocess_module, "run")(["/bin/sh", "-c", "echo fork"], timeout=1, check=False)
+        return getattr(result, "returncode", 1) == 0
+    except Exception:
+        return False
+
 def run(args, api):
     api.write_file("allowed.txt", "data-ok")
-    fork_escape = False
-    try:
-        subprocess.run(["/bin/sh", "-c", "echo fork"], timeout=1, check=False)
-        fork_escape = True
-    except Exception:
-        fork_escape = False
     created = 0
     for index in range(100):
         try:
-            api.write_file(f"many/{{index}}.txt", "x")
+            api.write_file("many/%s.txt" % index, "x")
             created += 1
         except Exception:
             break
-    return {{
-        "home_readable": _can_read({str(home_secret)!r}),
-        "env_readable": _can_read({str(project_env)!r}),
-        "core_readable": _can_read({str((Path.cwd() / "SPECIFICATION").resolve())!r}),
-        "code_writable": _can_write(__file__.replace("main.py", "blocked_write.txt")),
-        "host_tmp_write": _can_write(str({str(Path(tempfile.gettempdir()).resolve())!r}) + "/bwrap_escape.txt"),
+    return {
+        "wrapped_command": args.get("wrapped_command"),
+        "network_backend": args.get("network"),
+        "tmp_backend": args.get("tmp"),
+        "home_readable": _can_read(args["home_secret"]),
+        "env_readable": _can_read(args["project_env"]),
+        "core_readable": _can_read(args["core_file"]),
+        "code_writable": _can_write(args["code_file"]),
+        "host_tmp_write": _can_write(args["host_tmp_file"]),
         "direct_network_available": _direct_network_available(),
-        "fork_escape": fork_escape,
+        "process_execution_available": _process_execution_available(),
         "many_files_created": created,
         "large_output_len": len("x" * (2 * 1024 * 1024)),
         "data_content": api.read_file("allowed.txt"),
-    }}
+    }
 """
     (source / "src" / "main.py").write_text(textwrap.dedent(code), encoding="utf-8")
     (source / "plugin.yaml").write_text(
@@ -177,22 +220,45 @@ def _zip_plugin(source: Path, packages_dir: Path) -> Path:
     return package
 
 
-def _evaluate_result(result: dict[str, Any], audit_logger: AuditLogger) -> list[dict[str, Any]]:
+def _evaluate_result(
+    result: dict[str, Any],
+    audit_logger: AuditLogger,
+    os_limits: dict[str, Any],
+    observations: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
     data = result.get("data") if result.get("status") == "success" else {}
+    observations = observations or {}
+    backend = os_limits.get("sandbox_backend", {})
+    backend_details = backend.get("details", {}) if isinstance(backend, dict) else {}
     checks = [
+        ("plugin_executed", result.get("status") == "success", "validation plugin should execute inside sandbox"),
+        ("bwrap_backend_enforced", bool(backend.get("enforced")), "bubblewrap backend must be enforced"),
+        ("bwrap_wrapped_command", backend_details.get("wrapped_command") is True, "plugin process must be launched through bwrap"),
+        ("bwrap_unshared_network", backend_details.get("network") == "unshared", "bwrap must unshare network namespace"),
+        ("bwrap_private_tmp", backend_details.get("tmp") == "private_tmpfs", "bwrap must provide a private /tmp"),
         ("host_home_blocked", not data.get("home_readable"), "host HOME must not be readable"),
         ("env_blocked", not data.get("env_readable"), ".env must not be readable"),
         ("core_blocked", not data.get("core_readable"), "project core must not be readable"),
         ("code_readonly", not data.get("code_writable"), "plugin code directory must be read-only"),
-        ("host_tmp_blocked", not data.get("host_tmp_write"), "host tmp outside sandbox must not be writable"),
+        ("private_tmp_writable", data.get("host_tmp_write") is True, "sandbox private /tmp should be writable"),
+        ("host_tmp_not_leaked", not observations.get("host_tmp_leaked"), "sandbox private /tmp writes must not leak to host"),
         ("direct_network_blocked", not data.get("direct_network_available"), "direct network must be blocked"),
         ("data_write_allowed", data.get("data_content") == "data-ok", "plugin data directory should be writable via Gateway"),
         ("audit_records_present", len(audit_logger.read_records()) > 0, "audit records should be present"),
     ]
-    return [
+    results: list[dict[str, Any]] = [
         {"check_id": check_id, "status": "pass" if passed else "fail", "reason": reason}
         for check_id, passed, reason in checks
     ]
+    results.append(
+        {
+            "check_id": "process_execution_observed",
+            "status": "info",
+            "reason": "bwrap provides process namespace/resource containment; child process availability is recorded separately",
+            "observed": bool(data.get("process_execution_available")),
+        }
+    )
+    return results
 
 
 def main(argv: list[str] | None = None) -> int:
