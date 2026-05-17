@@ -360,6 +360,7 @@ class BubblewrapBackend(SandboxBackend):
         wrapped = [
             self._binary,
             "--die-with-parent",
+            "--unshare-user",
             "--unshare-pid",
             "--unshare-ipc",
             "--unshare-net",
@@ -456,6 +457,7 @@ def _probe_bubblewrap(binary: str) -> dict[str, Any]:
     command = [
         binary,
         "--die-with-parent",
+        "--unshare-user",
         "--unshare-pid",
         "--unshare-ipc",
         "--unshare-net",

@@ -2486,6 +2486,7 @@ class PluginSystemTests(unittest.TestCase):
         wrapped = backend.prepare_subprocess(command, plugin_dir=plugin_dir, project_root=Path.cwd())
 
         self.assertEqual(wrapped[0], "/usr/bin/bwrap")
+        self.assertIn("--unshare-user", wrapped)
         self.assertIn("--unshare-net", wrapped)
         self.assertIn("--clearenv", wrapped)
         self.assertIn("--tmpfs", wrapped)
