@@ -142,26 +142,43 @@ def _run_sample_validation(
             engine.grant_permissions("bwrap_validation_plugin")
             sandbox = engine.start_plugin("bwrap_validation_plugin")
             backend_details = dict(sandbox.os_limits.get("sandbox_backend", {}).get("details", {}))
-            result = engine.call_tool(
-                "bwrap_validation_plugin",
-                "run",
+            result = sandbox.execute_with_timeout(
+                "execute_tool",
                 {
-                    "home_secret": str(home_secret),
-                    "project_env": str(project_env),
-                    "core_file": str((Path.cwd() / "SPECIFICATION").resolve()),
-                    "code_file": str((plugins_dir / metadata.name / "src" / "blocked_write.txt").resolve()),
-                    "host_tmp_file": str(host_tmp_file),
-                    "wrapped_command": backend_details.get("wrapped_command"),
-                    "network": backend_details.get("network"),
-                    "tmp": backend_details.get("tmp"),
+                    "tool_name": "run",
+                    "args": {
+                        "home_secret": str(home_secret),
+                        "project_env": str(project_env),
+                        "core_file": str((Path.cwd() / "SPECIFICATION").resolve()),
+                        "code_file": str((plugins_dir / metadata.name / "src" / "blocked_write.txt").resolve()),
+                        "host_tmp_file": str(host_tmp_file),
+                        "wrapped_command": backend_details.get("wrapped_command"),
+                        "network": backend_details.get("network"),
+                        "tmp": backend_details.get("tmp"),
+                    },
                 },
+                timeout=15.0,
+                request_id=f"bwrap-validation-{uuid.uuid4().hex}",
             )
             os_limits = sandbox.os_limits
             sandbox_backend = sandbox.os_limits.get("sandbox_backend", {})
+            result.setdefault("request_id", None)
+            engine.audit_logger.record(
+                "plugin.tool_call",
+                "success" if result.get("status") == "success" else "error",
+                request_id=str(result.get("request_id") or "bwrap-validation"),
+                plugin="bwrap_validation_plugin",
+                action="run",
+                details={"arg_keys": ["code_file", "core_file", "home_secret", "host_tmp_file", "project_env"]},
+            )
         except Exception as exc:
             result = {"status": "error", "error": str(exc), "error_type": type(exc).__name__}
-            os_limits = {}
-            sandbox_backend = {}
+            if "sandbox" in locals():
+                os_limits = sandbox.os_limits
+                sandbox_backend = sandbox.os_limits.get("sandbox_backend", {})
+            else:
+                os_limits = {}
+                sandbox_backend = {}
         finally:
             engine.stop_all()
         observations = {"host_tmp_leaked": host_tmp_file.exists()}
@@ -378,7 +395,7 @@ def _direct_network_available():
         return False
     try:
         sock = socket_module.socket(socket_module.AF_INET, socket_module.SOCK_STREAM)
-        sock.settimeout(1)
+        sock.settimeout(0.2)
         sock.connect(("93.184.216.34", 80))
         sock.close()
         return True
