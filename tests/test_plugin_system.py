@@ -2484,7 +2484,11 @@ class PluginSystemTests(unittest.TestCase):
 
         plugin_dir = self.root / "plugins" / "bwrap_plugin"
         (plugin_dir / "data").mkdir(parents=True)
-        command = ["python", "-m", "modules.plugin_system.sandbox_stdio_worker"]
+        venv_python = self.root / ".venv" / "bin" / "python"
+        venv_python.parent.mkdir(parents=True)
+        venv_python.write_text("", encoding="utf-8")
+        (self.root / ".venv" / "pyvenv.cfg").write_text("home = /usr/bin\n", encoding="utf-8")
+        command = [str(venv_python), "-m", "modules.plugin_system.sandbox_stdio_worker"]
         wrapped = backend.prepare_subprocess(command, plugin_dir=plugin_dir, project_root=Path.cwd())
 
         self.assertEqual(wrapped[0], "/usr/bin/bwrap")
@@ -2498,6 +2502,7 @@ class PluginSystemTests(unittest.TestCase):
         self.assertIn(str(plugin_dir / "data"), backend.report.details["writable_binds"])
         self.assertEqual(backend.report.details["home"], str(plugin_dir / "data"))
         self.assertIn("_sandbox_runtime", backend.report.details["pythonpath"])
+        self.assertIn(str(self.root / ".venv"), backend.report.details["runtime_python_binds"])
         self.assertNotIn(str(Path.cwd()), backend.report.details["readonly_binds"])
 
     def test_bubblewrap_probe_binds_system_runtime_paths(self) -> None:

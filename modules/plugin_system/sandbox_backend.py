@@ -326,6 +326,7 @@ class BubblewrapBackend(SandboxBackend):
         runtime_modules_package_init = runtime_root / "modules" / "__init__.py"
         stdio_worker = runtime_plugin_system_dir / "sandbox_stdio_worker.py"
         plugin_source_dir = plugin_path / "src"
+        runtime_python_binds = _python_runtime_bind_paths(command[0])
         readonly_system_paths = [
             Path("/usr"),
             Path("/bin"),
@@ -340,6 +341,7 @@ class BubblewrapBackend(SandboxBackend):
                 runtime_modules_package_init,
                 runtime_plugin_system_dir,
                 plugin_source_dir,
+                *runtime_python_binds,
                 plugin_path / "plugin.yaml",
                 plugin_path / "requirements.lock",
                 plugin_path / "wheels",
@@ -378,6 +380,8 @@ class BubblewrapBackend(SandboxBackend):
         wrapped.extend(_bwrap_dir_args(data_dir.parent))
         wrapped.extend(_bwrap_dir_args(runtime_plugin_system_dir))
         wrapped.extend(_bwrap_dir_args(plugin_path))
+        for bind_path in runtime_python_binds:
+            wrapped.extend(_bwrap_dir_args(bind_path))
         for bind_path in readonly_binds:
             wrapped.extend(["--ro-bind", str(bind_path), str(bind_path)])
         wrapped.extend(
@@ -410,6 +414,7 @@ class BubblewrapBackend(SandboxBackend):
                 "writable_binds": [str(data_dir)],
                 "blocked_host_paths": [str(path) for path in blocked_host_paths],
                 "pythonpath": str(runtime_root),
+                "runtime_python_binds": [str(path) for path in runtime_python_binds],
                 "runtime_root": str(runtime_root),
                 "worker": str(stdio_worker),
                 "network": "unshared",
@@ -564,6 +569,16 @@ def _prepare_runtime_package(project_root: Path, runtime_root: Path) -> Path:
             raise RuntimeError(f"plugin system runtime file not found: {source}")
         shutil.copy2(source, runtime_plugin_system / filename)
     return runtime_plugin_system
+
+
+def _python_runtime_bind_paths(python_executable: str) -> list[Path]:
+    executable = Path(python_executable)
+    paths = [executable]
+    parents = list(executable.parents)
+    venv_root = next((parent for parent in parents if (parent / "pyvenv.cfg").exists()), None)
+    if venv_root is not None:
+        paths.append(venv_root)
+    return _dedupe_existing_paths(paths)
 
 
 def _dedupe_existing_paths(paths: list[Path]) -> list[Path]:
