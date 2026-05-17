@@ -65,6 +65,28 @@ class EnterpriseReadinessTests(unittest.TestCase):
         self.assertTrue(windows)
         self.assertIn("not full", windows[0]["reason"])
 
+    def test_doctor_simulated_windows_does_not_call_bwrap_which(self) -> None:
+        with patch("modules.plugin_system.doctor.sys.platform", "win32"), patch(
+            "modules.plugin_system.doctor.shutil.which",
+            side_effect=AssertionError("bwrap lookup should not run on simulated Windows"),
+        ):
+            report = doctor_report(run_doctor(plugins_dir=self.plugins_dir, production_mode=True))
+        windows = [item for item in report["checks"] if item["check_id"] == "sandbox.windows.boundary"]
+        self.assertTrue(windows)
+        self.assertTrue(windows[0]["production_blocking"])
+        self.assertTrue(report["production_blocking"])
+
+    def test_doctor_linux_checks_bwrap_with_safe_which(self) -> None:
+        with patch("modules.plugin_system.doctor.sys.platform", "linux"), patch(
+            "modules.plugin_system.doctor.platform.system",
+            return_value="Linux",
+        ), patch("modules.plugin_system.doctor.shutil.which", return_value="/usr/bin/bwrap") as which:
+            report = doctor_report(run_doctor(plugins_dir=self.plugins_dir, production_mode=False))
+        which.assert_any_call("bwrap")
+        bwrap = [item for item in report["checks"] if item["check_id"] == "sandbox.bubblewrap.binary"]
+        self.assertTrue(bwrap)
+        self.assertIn("/usr/bin/bwrap", bwrap[0]["reason"])
+
     def test_doctor_json_fields_are_complete_and_cli_survives(self) -> None:
         result = subprocess.run(
             [sys.executable, "cli.py", "--plugins-dir", str(self.plugins_dir), "doctor", "--json"],

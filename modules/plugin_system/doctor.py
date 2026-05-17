@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import platform
 import shutil
 import sys
 from dataclasses import asdict, dataclass
@@ -60,9 +61,11 @@ def run_doctor(
             False,
         )
     )
+    is_windows = sys.platform.startswith("win") or platform.system().lower().startswith("win")
+    is_linux = sys.platform == "linux" and not is_windows
     backend = create_sandbox_backend(128, 2, requested="auto")
-    bwrap_path = shutil.which("bwrap")
-    if sys.platform == "linux":
+    bwrap_path = None if is_windows else _safe_which("bwrap")
+    if is_linux:
         checks.append(
             _check(
                 "sandbox.bubblewrap.binary",
@@ -83,7 +86,7 @@ def run_doctor(
                 production_mode and not backend.report.enforced,
             )
         )
-    elif sys.platform == "win32":
+    elif is_windows:
         checks.append(
             _check(
                 "sandbox.windows.boundary",
@@ -288,6 +291,13 @@ def _check(
         severity=severity,
         production_blocking=production_blocking,
     )
+
+
+def _safe_which(command: str) -> str | None:
+    try:
+        return shutil.which(command)
+    except (AttributeError, OSError, TypeError):
+        return None
 
 
 if __name__ == "__main__":
