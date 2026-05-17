@@ -13,6 +13,7 @@
 | R-009 | Organization policy enforcement is configurable and can be omitted in dev paths. | Medium | Medium | Policy | PolicyEngine and CLI policy check. | Production deployment must require policy configuration and evidence. | Governance | Open | Conditional |
 | R-010 | CI workflow exists but real hosted matrix results must be reviewed. | Medium | Medium | CI/CD | Workflow self-check tests. | Run GitHub Actions and archive results. | Engineering | Open | Before release |
 | R-011 | RC drill evidence can be missing or stale if not collected for the exact release candidate. | High | Medium | Release governance | `collect_rc_evidence.py`, release gate inputs, drill runners for registry/revocation/quarantine/rollback. | Archive evidence from the target commit and do not treat missing, skipped, or stale drill output as pass. | Release/Security | Open | Yes before RC approval |
+| R-012 | GitHub-hosted Ubuntu bwrap diagnostics can fail because hosted runners restrict namespace or loopback operations. | High | Medium | CI/Sandbox | Hosted diagnostic artifact records backend capability failures and is kept separate from production validation. | Must run `--mode production-required` on a controlled Linux VM or self-hosted runner labeled `self-hosted`, `linux`, `bwrap`. | Platform/Ops | Open | Yes for bwrap validation |
 
 Accepted risks must not be created automatically. Update a risk to accepted only when the approver provides
 `risk_id`, `accepted_by`, `role`, `acceptance_scope`, `expiration_date`, `compensating_controls`,

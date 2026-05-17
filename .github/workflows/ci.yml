@@ -5,6 +5,7 @@ on:
     branches: ["**"]
   pull_request:
     branches: ["**"]
+  workflow_dispatch:
 
 jobs:
   test:
@@ -74,9 +75,12 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  linux-bwrap-validation:
-    name: ubuntu-latest bwrap validation
+  github-hosted-bwrap-diagnostic:
+    name: github-hosted bwrap diagnostic
     runs-on: ubuntu-latest
+    continue-on-error: true
+    env:
+      RUNNER_ENVIRONMENT: github-hosted
 
     steps:
       - name: Checkout
@@ -129,12 +133,12 @@ jobs:
         run: plugin-cli --production doctor --json > evidence/doctor.json
         continue-on-error: true
 
-      - name: Run bwrap sandbox validation
+      - name: Run GitHub-hosted bwrap diagnostic
         run: |
           set +e
-          python scripts/validate_bwrap_sandbox.py --json > evidence/bwrap_validation.json
+          python scripts/validate_bwrap_sandbox.py --mode diagnostic --json > evidence/bwrap_diagnostic_github_hosted.json
           status=$?
-          cat evidence/bwrap_validation.json
+          cat evidence/bwrap_diagnostic_github_hosted.json
           exit "$status"
 
       - name: Run acceptance evidence collection
@@ -148,11 +152,91 @@ jobs:
         run: python scripts/release_gate.py --json > evidence/release_gate.json
         continue-on-error: true
 
-      - name: Upload Linux bwrap evidence
+      - name: Upload GitHub-hosted bwrap diagnostic evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: linux-bwrap-evidence-${{ github.sha }}
+          name: github-hosted-bwrap-diagnostic-evidence-${{ github.sha }}
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 14
+
+  target-linux-bwrap-production-validation:
+    name: target linux bwrap production validation
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: [self-hosted, linux, bwrap]
+    env:
+      RUNNER_ENVIRONMENT: self-hosted
+      RUNNER_LABELS: self-hosted,linux,bwrap
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Verify bubblewrap
+        run: |
+          command -v bwrap
+          bwrap --version
+
+      - name: Install package and dev tools
+        run: python -m pip install -e ".[dev]"
+
+      - name: Prepare evidence directory
+        run: mkdir -p evidence data/test_runs
+
+      - name: Run Linux quality gate
+        run: |
+          python -m unittest discover -s tests
+          python -m ruff check .
+          python -m mypy .
+          python -m coverage run -m unittest discover -s tests
+          python -m coverage report | tee evidence/coverage-report.txt
+
+      - name: Capture target Linux environment
+        run: |
+          {
+            echo "workflow=${{ github.workflow }}"
+            echo "run_id=${{ github.run_id }}"
+            echo "run_attempt=${{ github.run_attempt }}"
+            echo "head_sha=${{ github.sha }}"
+            echo "ref=${{ github.ref }}"
+            echo "runner_os=${{ runner.os }}"
+            echo "runner_environment=${{ runner.environment }}"
+            echo "python=$(python --version)"
+            echo "uname=$(uname -a)"
+            echo "bwrap=$(bwrap --version)"
+            if command -v lsb_release >/dev/null 2>&1; then
+              lsb_release -a
+            fi
+          } > evidence/linux_environment.txt
+
+      - name: Run production doctor
+        run: plugin-cli --production doctor --json > evidence/doctor.json
+
+      - name: Run production-required bwrap validation
+        run: python scripts/validate_bwrap_sandbox.py --mode production-required --json > evidence/bwrap_validation.json
+
+      - name: Run acceptance evidence collection
+        run: python scripts/run_production_acceptance.py --json --output evidence/acceptance_result.json
+
+      - name: Generate local audit verify evidence
+        run: python scripts/generate_audit_verify_evidence.py --output evidence/audit_verify.json
+
+      - name: Evaluate release gate
+        run: python scripts/release_gate.py --json > evidence/release_gate.json
+        continue-on-error: true
+
+      - name: Upload target Linux bwrap production evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: target-linux-bwrap-production-evidence-${{ github.sha }}
           path: evidence/
           if-no-files-found: error
           retention-days: 14

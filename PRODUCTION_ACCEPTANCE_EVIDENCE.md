@@ -10,7 +10,7 @@ This file records the current local RC evidence status. Do not treat missing or 
 | GitHub push | `main`, `v0.9.0-rc1`, and `v0.9.0-rc2` were pushed to `origin`. |
 | Recommended validation tag | `v0.9.0-rc2`. |
 | Historical RC tag | `v0.9.0-rc1` remains the local RC freeze point and was not moved. |
-| Post-RC2 note | This document revision adds local audit evidence helper instructions after `v0.9.0-rc2`; do not move the tag. Create `v0.9.0-rc3` if these changes should be part of a tagged validation run. |
+| Post-RC2 note | This document revision adds local audit evidence helper instructions and separates GitHub-hosted bwrap diagnostic from target production validation after `v0.9.0-rc2`; do not move the tag. Create `v0.9.0-rc3` if these changes should be part of a tagged validation run. |
 | GitHub Actions | Stale for current HEAD. The archived run passed for an older commit and must not be treated as current HEAD CI evidence. |
 | CI run URL | `https://github.com/yunqiguo154-png/humanoid-agi-plugin-system/actions/runs/25985684158` for stale head `36e4fcd51209a05f6ca5902c53970ab4edebf601`. |
 | GitHub Actions run URL | `https://github.com/yunqiguo154-png/humanoid-agi-plugin-system/actions/runs/25985684158` for stale head `36e4fcd51209a05f6ca5902c53970ab4edebf601`. |
@@ -72,15 +72,25 @@ The script does not generate CI URLs or fake environment results. Any skipped st
 
 Evidence path: `evidence/bwrap_validation.json`.
 
-Current result: skipped. Reason: bubblewrap validation requires Linux. This is production-blocking for full third-party production approval.
+Current result: target Linux+bwrap validation is Missing. Local Windows evidence is skipped. GitHub-hosted bwrap
+diagnostic failed or is unsupported because hosted runners can deny namespace or loopback operations required by
+bubblewrap. This is production-blocking for full third-party production approval.
 
-Command:
+GitHub-hosted diagnostic command and artifact:
 
 ```bash
-python scripts/validate_bwrap_sandbox.py --json
+python scripts/validate_bwrap_sandbox.py --mode diagnostic --json > evidence/bwrap_diagnostic_github_hosted.json
 ```
 
+Artifact: `github-hosted-bwrap-diagnostic-evidence-${{ github.sha }}`.
+
+This diagnostic artifact does not unlock Release Gate `bwrap.validation`, even if it records useful backend details.
+Do not rename it to `bwrap_validation.json` for production approval.
+
 Target Linux validation commands:
+
+`scripts/validate_bwrap_sandbox.py --json` defaults to production-required mode for backward compatibility, but
+acceptance evidence should use the explicit command below.
 
 ```bash
 git clone https://github.com/yunqiguo154-png/humanoid-agi-plugin-system.git
@@ -101,7 +111,7 @@ python3 -m coverage run -m unittest discover -s tests
 python3 -m coverage report
 mkdir -p evidence
 plugin-cli doctor --production --json > evidence/doctor.json
-python3 scripts/validate_bwrap_sandbox.py --json > evidence/bwrap_validation.json
+python3 scripts/validate_bwrap_sandbox.py --mode production-required --json > evidence/bwrap_validation.json
 python3 scripts/run_production_acceptance.py --json --output evidence/acceptance_result.json
 python3 scripts/generate_audit_verify_evidence.py --output evidence/audit_verify.json  # requires post-RC2 main or a later RC tag
 python3 scripts/release_gate.py --json > evidence/release_gate.json
@@ -115,8 +125,11 @@ sudo apt-get install -y bubblewrap
 ```
 
 The target archive must record Linux distribution, kernel, `bwrap --version`, Python version, commit SHA, and tag.
-Windows local evidence cannot replace Linux+bwrap validation. GitHub Actions Ubuntu cannot fully replace validation on the
-target production Linux host class. A skipped bwrap validation is not a pass.
+Windows local evidence cannot replace Linux+bwrap validation. GitHub Actions hosted Ubuntu diagnostic evidence cannot
+replace validation on the target production Linux host class. A skipped, unsupported, failed, or diagnostic bwrap
+validation is not a pass. Release Gate only clears `bwrap.validation` with `mode=production-required`,
+`environment_class=self_hosted` or target Linux evidence, `sandbox_backend.enforced=true`, required backend capabilities,
+and all critical sandbox checks passing.
 
 ## Audit Evidence
 
@@ -193,7 +206,8 @@ List accepted risks from `RISK_REGISTER.md`, including owner and expiry/review d
 | `evidence/local_quality_gate.json` | pass locally: unittest, ruff, mypy, coverage 71%. |
 | `evidence/ci_result.json` | stale for current HEAD. The recorded run passed older head `36e4fcd51209a05f6ca5902c53970ab4edebf601`; current HEAD was `7b0aa53773aef957a98c610967a5469cec962848` before this documentation/tooling update. |
 | `evidence/doctor.json` | fail, production_blocking. |
-| `evidence/bwrap_validation.json` | skipped, production_blocking for full production. |
+| `evidence/bwrap_diagnostic_github_hosted.json` | fail / unsupported_environment diagnostic only; production_blocking and not Release Gate pass evidence. |
+| `evidence/bwrap_validation.json` | Missing for target Linux+bwrap production-required validation; production_blocking for full production. |
 | `evidence/acceptance_result.json` | not_ready. |
 | `evidence/audit_verify.json` | warn: local hash chain and checkpoint verified, but external append-only/SIEM/WORM anchor is missing and controlled risk is required. |
 | `evidence/scanner_report.json` | missing, production_blocking. |
@@ -205,5 +219,5 @@ List accepted risks from `RISK_REGISTER.md`, including owner and expiry/review d
 
 Windows workstation evidence cannot replace target Linux+bwrap evidence. Local hash chains and local checkpoints cannot
 replace an external append-only/SIEM/WORM audit anchor. Offline scanner fixture output cannot replace real vulnerability
-intelligence. GitHub Actions Ubuntu cannot fully replace target production Linux host validation. The release remains
+intelligence. GitHub-hosted bwrap diagnostic cannot replace target production Linux host validation. The release remains
 `v0.9.0-rc2`, not GA.

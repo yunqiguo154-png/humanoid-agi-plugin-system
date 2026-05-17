@@ -33,7 +33,7 @@ def run_acceptance(args: argparse.Namespace) -> dict[str, Any]:
         ),
         _run_step(
             "bwrap_validation",
-            [sys.executable, "scripts/validate_bwrap_sandbox.py", "--json"],
+            [sys.executable, "scripts/validate_bwrap_sandbox.py", "--mode", "production-required", "--json"],
             blocking=False,
             json_status=True,
             skipped_not_ready=True,

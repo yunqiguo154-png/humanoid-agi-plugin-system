@@ -62,7 +62,7 @@ def evaluate_release_gate(inputs: GateInput) -> GateResult:
 
     findings.append(_ci_finding(inputs.ci, risks_accepted))
     findings.extend(_doctor_findings(inputs.doctor))
-    findings.append(_status_finding("bwrap.validation", inputs.bwrap, require_pass=True))
+    findings.append(_bwrap_finding(inputs.bwrap))
     findings.append(_audit_finding(inputs.audit))
     findings.append(_scan_finding(inputs.scan, risks_accepted))
     findings.append(_status_finding("registry.verify", inputs.registry, require_pass=True))
@@ -240,6 +240,104 @@ def _status_finding(check_id: str, payload: dict[str, Any] | None, *, require_pa
         str(payload.get("reason") or payload.get("summary") or f"{check_id} status={status}"),
         production_blocking=require_pass and status != "pass",
     )
+
+
+def _bwrap_finding(payload: dict[str, Any] | None) -> GateFinding:
+    check_id = "bwrap.validation"
+    if payload is None:
+        return GateFinding(check_id, "fail", f"{check_id} evidence is missing", production_blocking=True)
+
+    status = _normalized_status(payload)
+    mode = str(payload.get("mode", "")).strip().lower()
+    environment_class = str(payload.get("environment_class", "")).strip().lower()
+
+    if mode == "diagnostic":
+        return GateFinding(
+            "sandbox.target_linux_required",
+            "fail",
+            "GitHub-hosted or diagnostic bwrap evidence cannot satisfy target production Linux+bwrap validation",
+            production_blocking=True,
+        )
+
+    if environment_class == "github_hosted":
+        return GateFinding(
+            "sandbox.target_linux_required",
+            "fail",
+            "GitHub-hosted runner evidence cannot satisfy target production Linux+bwrap validation",
+            production_blocking=True,
+        )
+
+    if status == "skipped":
+        return GateFinding(
+            check_id,
+            "fail",
+            "bwrap validation was skipped; target Linux sandbox evidence is required for full production",
+            production_blocking=True,
+        )
+
+    if mode and mode != "production-required":
+        return GateFinding(
+            check_id,
+            "fail",
+            f"bwrap evidence mode={mode} is not production-required",
+            production_blocking=True,
+        )
+
+    if status != "pass":
+        return GateFinding(
+            check_id,
+            "fail",
+            str(payload.get("reason") or payload.get("summary") or f"{check_id} status={status}"),
+            production_blocking=True,
+        )
+
+    backend = payload.get("sandbox_backend")
+    backend_ok = _bwrap_backend_enforced(backend)
+    checks_ok = _bwrap_critical_checks_pass(payload.get("checks"))
+    if backend_ok and checks_ok:
+        return GateFinding(check_id, "pass", "production-required target Linux+bwrap validation passed")
+
+    return GateFinding(
+        check_id,
+        "fail",
+        "bwrap evidence is missing enforced backend capabilities or critical pass checks",
+        production_blocking=True,
+    )
+
+
+def _bwrap_backend_enforced(backend: Any) -> bool:
+    if not isinstance(backend, dict) or backend.get("enforced") is not True:
+        return False
+    capabilities = backend.get("capabilities")
+    if not isinstance(capabilities, dict):
+        return False
+    required = ["process_containment", "resource_limits", "filesystem_isolation", "network_isolation"]
+    return all(capabilities.get(name) is True for name in required)
+
+
+def _bwrap_critical_checks_pass(checks: Any) -> bool:
+    if not isinstance(checks, list):
+        return False
+    required = {
+        "bwrap_backend_enforced",
+        "bwrap_wrapped_command",
+        "bwrap_unshared_network",
+        "bwrap_private_tmp",
+        "host_home_blocked",
+        "env_blocked",
+        "core_blocked",
+        "code_readonly",
+        "host_tmp_not_leaked",
+        "direct_network_blocked",
+        "data_write_allowed",
+        "audit_records_present",
+    }
+    statuses = {
+        str(item.get("check_id")): str(item.get("status"))
+        for item in checks
+        if isinstance(item, dict)
+    }
+    return all(statuses.get(check_id) == "pass" for check_id in required)
 
 
 def _audit_finding(payload: dict[str, Any] | None) -> GateFinding:

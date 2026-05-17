@@ -437,6 +437,7 @@ class EnterpriseReadinessTests(unittest.TestCase):
             "emergency quarantine",
             "final go/no-go decision",
             "Known Accepted Risks",
+            "production-required",
         ]:
             self.assertIn(token, content)
 
@@ -444,6 +445,61 @@ class EnterpriseReadinessTests(unittest.TestCase):
         with patch("scripts.validate_bwrap_sandbox.sys.platform", "win32"):
             report = run_validation(self.root / "validation")
         self.assertEqual(report["status"], "skipped")
+        self.assertEqual(report["mode"], "production-required")
+        self.assertTrue(report["production_blocking"])
+
+    def test_bwrap_validation_production_required_fails_closed_before_sample(self) -> None:
+        backend = {
+            "name": "bubblewrap",
+            "enforced": False,
+            "platform": "linux",
+            "details": {"probe": {"ok": False, "error": "operation not permitted"}},
+            "warnings": ["bubblewrap probe failed"],
+            "capabilities": {
+                "process_containment": False,
+                "resource_limits": False,
+                "filesystem_isolation": False,
+                "network_isolation": False,
+            },
+            "missing_capabilities": [
+                "process_containment",
+                "resource_limits",
+                "filesystem_isolation",
+                "network_isolation",
+            ],
+        }
+        with (
+            patch("scripts.validate_bwrap_sandbox.sys.platform", "linux"),
+            patch("scripts.validate_bwrap_sandbox.shutil.which", return_value="/usr/bin/bwrap"),
+            patch("scripts.validate_bwrap_sandbox._probe_backend_report", return_value=backend),
+            patch("scripts.validate_bwrap_sandbox._run_sample_validation") as sample,
+        ):
+            report = run_validation(self.root / "validation", mode="production-required")
+
+        sample.assert_not_called()
+        self.assertEqual(report["status"], "fail")
+        self.assertTrue(report["production_blocking"])
+        self.assertEqual(report["result"]["status"], "not_run")
+
+    def test_bwrap_validation_diagnostic_records_github_hosted_as_unsupported(self) -> None:
+        sample_report = {
+            "status": "pass",
+            "checks": [],
+            "sandbox_backend": {"enforced": True, "capabilities": {}},
+        }
+        with (
+            patch("scripts.validate_bwrap_sandbox.sys.platform", "linux"),
+            patch("scripts.validate_bwrap_sandbox.shutil.which", return_value="/usr/bin/bwrap"),
+            patch("scripts.validate_bwrap_sandbox._detect_environment_class", return_value="github_hosted"),
+            patch("scripts.validate_bwrap_sandbox._probe_backend_report", return_value={"enforced": True, "capabilities": {}}),
+            patch("scripts.validate_bwrap_sandbox._run_sample_validation", return_value=sample_report),
+        ):
+            report = run_validation(self.root / "validation", mode="diagnostic")
+
+        self.assertEqual(report["mode"], "diagnostic")
+        self.assertEqual(report["environment_class"], "github_hosted")
+        self.assertEqual(report["status"], "unsupported_environment")
+        self.assertTrue(report["production_blocking"])
 
     def test_bwrap_validation_sample_passes_static_scan(self) -> None:
         source = _make_malicious_plugin(self.root, self.root / ".env", self.root / "home.secret")

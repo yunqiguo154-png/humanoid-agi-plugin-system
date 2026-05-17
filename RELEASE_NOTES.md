@@ -10,7 +10,7 @@ Do not mark this as `v1.0.0` GA until the external production acceptance items a
 
 - `v0.9.0-rc1`: local RC freeze point.
 - `v0.9.0-rc2`: CI evidence archival and external validation preparation point.
-- Post-RC2 `main` adds local audit verify evidence tooling. Do not move `v0.9.0-rc2`; create a later RC tag if this tooling should be part of a tagged validation run.
+- Post-RC2 `main` adds local audit verify evidence tooling and separates GitHub-hosted bwrap diagnostic from target production validation. Do not move `v0.9.0-rc2`; create a later RC tag if this tooling should be part of a tagged validation run.
 - Current status remains RC, not GA.
 
 ## Current Capability
@@ -28,6 +28,7 @@ Do not mark this as `v1.0.0` GA until the external production acceptance items a
 - JSONL audit hash chain with checkpoint anchor interface.
 - Disable, quarantine, revoke, revoked key, and revoked plugin version controls.
 - CI workflow for Linux/Windows and Python 3.11/3.12/3.13.
+- GitHub-hosted bwrap diagnostic artifact plus workflow-dispatch self-hosted Linux+bwrap production validation template.
 - RC evidence tooling: local evidence collector, local audit verify evidence helper, plus registry, revocation, quarantine, and rollback drill runners.
 
 ## Security Boundary
@@ -44,6 +45,7 @@ Plugin output remains untrusted tool result data and must be validated by downst
 - Offline scanner adapters are not real vulnerability intelligence.
 - Registry support is signed distribution, not a full public marketplace.
 - Real bwrap behavior depends on target Linux kernel, namespace permissions, and deployment configuration.
+- GitHub-hosted Ubuntu bwrap diagnostics can fail because hosted runners restrict namespace or loopback operations; this is not production Linux+bwrap pass evidence.
 
 ## Upgrade Notes
 
@@ -68,7 +70,8 @@ from a later commit or tag that contains `scripts/generate_audit_verify_evidence
 - GitHub Actions matrix URL.
 - `acceptance_result.json`.
 - Production Doctor JSON.
-- bwrap validation JSON.
+- `bwrap_validation.json` from `--mode production-required` on a target Linux VM or self-hosted Linux+bwrap runner.
+- Optional `bwrap_diagnostic_github_hosted.json` for hosted runner troubleshooting only.
 - Scanner report from the approved scanner.
 - Audit checkpoint verification.
 - Registry, revocation, emergency quarantine, and rollback drill output.
@@ -79,6 +82,7 @@ from a later commit or tag that contains `scripts/generate_audit_verify_evidence
 - Do not claim local checkpoints are immutable audit logs.
 - Do not claim offline fixture scanners provide real vulnerability coverage.
 - Do not claim the registry client is a complete public marketplace.
+- Do not claim GitHub-hosted bwrap diagnostic output is target Linux+bwrap production validation.
 
 ## v1.0 GA Exit Criteria
 

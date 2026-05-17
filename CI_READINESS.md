@@ -111,3 +111,45 @@ The test suite includes workflow self-checks verifying that CI contains:
 - coverage.
 
 Core unittest execution does not require real external network access.
+
+## Bwrap Diagnostic And Production Validation
+
+The ordinary CI matrix is the required hosted quality gate. The hosted bwrap job is diagnostic only:
+
+```text
+github-hosted-bwrap-diagnostic
+```
+
+It runs on `ubuntu-latest` and writes:
+
+```text
+evidence/bwrap_diagnostic_github_hosted.json
+github-hosted-bwrap-diagnostic-evidence-${{ github.sha }}
+```
+
+GitHub-hosted runners may block the namespace or loopback operations needed by bubblewrap and return errors such as
+`Failed RTM_NEWADDR: Operation not permitted`. The diagnostic job may therefore fail or report
+`unsupported_environment`; this does not make the normal matrix fail, and it does not satisfy production bwrap evidence.
+
+Production bwrap validation is a separate manual job:
+
+```text
+target-linux-bwrap-production-validation
+```
+
+Trigger it with `workflow_dispatch` after registering a controlled self-hosted runner labeled:
+
+```text
+self-hosted
+linux
+bwrap
+```
+
+That job writes `evidence/bwrap_validation.json` with:
+
+```bash
+python scripts/validate_bwrap_sandbox.py --mode production-required --json
+```
+
+Only a `production-required` pass from a target Linux VM or self-hosted Linux+bwrap runner can clear the Release Gate
+`bwrap.validation` blocker. Diagnostic, skipped, unsupported, or GitHub-hosted bwrap evidence must remain blocking.

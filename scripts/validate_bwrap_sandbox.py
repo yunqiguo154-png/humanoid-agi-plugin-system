@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import json
 import shutil
 import sys
@@ -8,6 +9,7 @@ import tempfile
 import textwrap
 import uuid
 import zipfile
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -18,13 +20,102 @@ if str(PROJECT_ROOT) not in sys.path:
 from modules.plugin_system.audit import AuditLogger
 from modules.plugin_system.engine import PluginEngine
 from modules.plugin_system.loader import PACKAGE_LOCK_FILE, write_package_lock
+from modules.plugin_system.sandbox_backend import create_sandbox_backend, sandbox_capabilities
 
 
-def run_validation(workdir: str | Path | None = None) -> dict[str, Any]:
+VALIDATION_MODE_DIAGNOSTIC = "diagnostic"
+VALIDATION_MODE_PRODUCTION_REQUIRED = "production-required"
+VALIDATION_MODES = {VALIDATION_MODE_DIAGNOSTIC, VALIDATION_MODE_PRODUCTION_REQUIRED}
+
+PRODUCTION_REQUIRED_CAPABILITIES = (
+    "process_containment",
+    "resource_limits",
+    "filesystem_isolation",
+    "network_isolation",
+)
+
+PRODUCTION_REQUIRED_CHECKS = {
+    "bwrap_backend_enforced",
+    "bwrap_wrapped_command",
+    "bwrap_unshared_network",
+    "bwrap_private_tmp",
+    "host_home_blocked",
+    "env_blocked",
+    "core_blocked",
+    "code_readonly",
+    "host_tmp_not_leaked",
+    "direct_network_blocked",
+    "data_write_allowed",
+    "audit_records_present",
+}
+
+
+def run_validation(
+    workdir: str | Path | None = None,
+    *,
+    mode: str = VALIDATION_MODE_PRODUCTION_REQUIRED,
+) -> dict[str, Any]:
+    if mode not in VALIDATION_MODES:
+        raise ValueError(f"unsupported bwrap validation mode: {mode}")
+
+    environment_class = _detect_environment_class()
     if sys.platform != "linux":
-        return {"status": "skipped", "reason": "bubblewrap validation requires Linux", "checks": []}
+        return _finalize_report(
+            {
+                "status": "skipped",
+                "reason": "bubblewrap validation requires Linux",
+                "checks": [],
+                "sandbox_backend": _empty_backend_report("bubblewrap validation requires Linux"),
+                "recommendation": _target_linux_recommendation(mode, environment_class),
+            },
+            mode=mode,
+            environment_class=environment_class,
+        )
     if not shutil.which("bwrap"):
-        return {"status": "skipped", "reason": "bubblewrap executable is not available", "checks": []}
+        return _finalize_report(
+            {
+                "status": "skipped",
+                "reason": "bubblewrap executable is not available",
+                "checks": [],
+                "sandbox_backend": _empty_backend_report("bubblewrap executable is not available"),
+                "recommendation": _target_linux_recommendation(mode, environment_class),
+            },
+            mode=mode,
+            environment_class=environment_class,
+        )
+
+    preflight = _probe_backend_report()
+    if mode == VALIDATION_MODE_PRODUCTION_REQUIRED and not _backend_has_required_capabilities(preflight):
+        return _finalize_report(
+            {
+                "status": "fail",
+                "reason": "bubblewrap backend is not enforced; production-required validation failed closed without running the sample plugin",
+                "workdir": str(Path(workdir).resolve()) if workdir else None,
+                "result": {
+                    "status": "not_run",
+                    "reason": "production-required mode does not run the validation sample without an enforced bwrap backend",
+                },
+                "checks": _preflight_checks(preflight),
+                "audit_records": 0,
+                "sandbox_backend": preflight,
+                "observations": {"sample_executed": False},
+                "recommendation": _target_linux_recommendation(mode, environment_class),
+            },
+            mode=mode,
+            environment_class=environment_class,
+        )
+
+    report = _run_sample_validation(workdir, mode=mode)
+    if not report.get("sandbox_backend"):
+        report["sandbox_backend"] = preflight
+    return _finalize_report(report, mode=mode, environment_class=environment_class)
+
+
+def _run_sample_validation(
+    workdir: str | Path | None = None,
+    *,
+    mode: str,
+) -> dict[str, Any]:
     root = Path(workdir).resolve() if workdir else Path(tempfile.mkdtemp(prefix="humanoid-bwrap-"))
     root.mkdir(parents=True, exist_ok=True)
     plugins_dir = root / "plugins"
@@ -40,7 +131,12 @@ def run_validation(workdir: str | Path | None = None) -> dict[str, Any]:
         source = _make_malicious_plugin(root, project_env, home_secret)
         package = _zip_plugin(source, packages_dir)
         audit_logger = AuditLogger(root / "bwrap-validation.audit.log")
-        engine = PluginEngine(plugins_dir, sandbox_backend="bubblewrap", audit_logger=audit_logger)
+        engine = PluginEngine(
+            plugins_dir,
+            sandbox_backend="bubblewrap",
+            audit_logger=audit_logger,
+            require_enforced_sandbox=mode == VALIDATION_MODE_PRODUCTION_REQUIRED,
+        )
         try:
             metadata = engine.install(package)
             engine.grant_permissions("bwrap_validation_plugin")
@@ -79,6 +175,7 @@ def run_validation(workdir: str | Path | None = None) -> dict[str, Any]:
             "audit_records": len(audit_logger.read_records()),
             "sandbox_backend": sandbox_backend,
             "observations": observations,
+            "recommendation": _target_linux_recommendation(mode, _detect_environment_class()),
         }
     finally:
         if previous_env is None:
@@ -96,6 +193,154 @@ def run_validation(workdir: str | Path | None = None) -> dict[str, Any]:
             host_tmp_file.unlink()
         except FileNotFoundError:
             pass
+
+
+def _probe_backend_report() -> dict[str, Any]:
+    try:
+        backend = create_sandbox_backend(128, 2, requested="bubblewrap")
+        report = backend.report
+        return {
+            "name": report.name,
+            "enforced": report.enforced,
+            "platform": report.platform,
+            "details": report.details,
+            "warnings": report.warnings,
+            "capabilities": report.capabilities,
+            "missing_capabilities": report.missing_capabilities(),
+        }
+    except Exception as exc:
+        return {
+            "name": "bubblewrap",
+            "enforced": False,
+            "platform": sys.platform,
+            "details": {},
+            "warnings": [f"bubblewrap backend probe raised {type(exc).__name__}: {exc}"],
+            "capabilities": sandbox_capabilities(),
+            "missing_capabilities": list(PRODUCTION_REQUIRED_CAPABILITIES),
+        }
+
+
+def _empty_backend_report(reason: str) -> dict[str, Any]:
+    return {
+        "name": "bubblewrap",
+        "enforced": False,
+        "platform": sys.platform,
+        "details": {},
+        "warnings": [reason],
+        "capabilities": sandbox_capabilities(),
+        "missing_capabilities": list(PRODUCTION_REQUIRED_CAPABILITIES),
+    }
+
+
+def _backend_has_required_capabilities(backend: dict[str, Any]) -> bool:
+    capabilities = backend.get("capabilities", {})
+    if not isinstance(capabilities, dict):
+        return False
+    return bool(backend.get("enforced")) and all(
+        capabilities.get(capability) is True for capability in PRODUCTION_REQUIRED_CAPABILITIES
+    )
+
+
+def _preflight_checks(backend: dict[str, Any]) -> list[dict[str, Any]]:
+    details = backend.get("details", {}) if isinstance(backend.get("details"), dict) else {}
+    capabilities = backend.get("capabilities", {}) if isinstance(backend.get("capabilities"), dict) else {}
+    checks = [
+        ("plugin_executed", False, "validation plugin must not execute without enforced bwrap in production-required mode"),
+        ("bwrap_backend_enforced", bool(backend.get("enforced")), "bubblewrap backend must be enforced"),
+        ("bwrap_wrapped_command", details.get("wrapped_command") is True, "plugin process must be launched through bwrap"),
+        ("bwrap_unshared_network", details.get("network") == "unshared", "bwrap must unshare network namespace"),
+        ("bwrap_private_tmp", details.get("tmp") == "private_tmpfs", "bwrap must provide a private /tmp"),
+        ("filesystem_isolation", capabilities.get("filesystem_isolation") is True, "bwrap must provide filesystem isolation"),
+        ("network_isolation", capabilities.get("network_isolation") is True, "bwrap must provide network isolation"),
+        ("process_containment", capabilities.get("process_containment") is True, "bwrap must provide process containment"),
+        ("resource_limits", capabilities.get("resource_limits") is True, "worker resource limits must be available"),
+    ]
+    return [
+        {"check_id": check_id, "status": "pass" if passed else "fail", "reason": reason}
+        for check_id, passed, reason in checks
+    ]
+
+
+def _detect_environment_class() -> str:
+    if os.environ.get("GITHUB_ACTIONS", "").lower() == "true":
+        runner_environment = os.environ.get("RUNNER_ENVIRONMENT", "").strip().lower()
+        labels = os.environ.get("RUNNER_LABELS", "").lower()
+        if runner_environment == "self-hosted" or "self-hosted" in labels:
+            return "self_hosted"
+        return "github_hosted"
+    return "unknown"
+
+
+def _target_linux_recommendation(mode: str, environment_class: str) -> str:
+    if mode == VALIDATION_MODE_DIAGNOSTIC:
+        return (
+            "Archive this as diagnostic evidence only. It does not satisfy Release Gate bwrap.validation; "
+            "run production-required validation on a target Linux VM or a self-hosted runner labeled linux,bwrap."
+        )
+    if environment_class == "github_hosted":
+        return (
+            "GitHub-hosted runners are not target production Linux+bwrap evidence. Run production-required validation "
+            "on a controlled Linux VM or a self-hosted runner labeled self-hosted,linux,bwrap."
+        )
+    return "Fix the target Linux+bwrap environment and rerun production-required validation."
+
+
+def _finalize_report(
+    report: dict[str, Any],
+    *,
+    mode: str,
+    environment_class: str,
+) -> dict[str, Any]:
+    report["mode"] = mode
+    report["environment_class"] = environment_class
+    report.setdefault("sandbox_backend", _empty_backend_report("sandbox backend report missing"))
+    report.setdefault("checks", [])
+    report.setdefault("generated_at", datetime.now(UTC).isoformat())
+    report.setdefault("recommendation", _target_linux_recommendation(mode, environment_class))
+
+    if mode == VALIDATION_MODE_DIAGNOSTIC:
+        report["production_blocking"] = True
+        if environment_class == "github_hosted":
+            current_status = str(report.get("status", "fail"))
+            if current_status == "pass":
+                report["status"] = "unsupported_environment"
+                report["reason"] = (
+                    "GitHub-hosted diagnostic completed, but hosted runner output is not target production "
+                    "Linux+bwrap validation evidence"
+                )
+            else:
+                report.setdefault(
+                    "reason",
+                    "GitHub-hosted bwrap diagnostic is unsupported as production validation evidence",
+                )
+        else:
+            report.setdefault("reason", "diagnostic mode is not production validation evidence")
+        return report
+
+    status = str(report.get("status", "fail"))
+    checks = report.get("checks", [])
+    backend = report.get("sandbox_backend", {})
+    critical_pass = _critical_checks_pass(checks) and _backend_has_required_capabilities(backend)
+    if status == "pass" and critical_pass:
+        report["production_blocking"] = False
+        report.setdefault("reason", "production-required bwrap validation passed")
+        return report
+
+    report["status"] = "fail" if status != "skipped" else "skipped"
+    report["production_blocking"] = True
+    report.setdefault("reason", "production-required bwrap validation did not pass")
+    return report
+
+
+def _critical_checks_pass(checks: Any) -> bool:
+    if not isinstance(checks, list):
+        return False
+    statuses = {
+        str(item.get("check_id")): str(item.get("status"))
+        for item in checks
+        if isinstance(item, dict)
+    }
+    return all(statuses.get(check_id) == "pass" for check_id in PRODUCTION_REQUIRED_CHECKS)
 
 
 def _make_malicious_plugin(root: Path, project_env: Path, home_secret: Path) -> Path:
@@ -264,16 +509,26 @@ def _evaluate_result(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Validate Linux bubblewrap plugin sandbox behavior")
     parser.add_argument("--workdir")
+    parser.add_argument(
+        "--mode",
+        choices=sorted(VALIDATION_MODES),
+        default=VALIDATION_MODE_PRODUCTION_REQUIRED,
+        help="diagnostic records hosted-runner capability details; production-required fails closed before running samples if bwrap is not enforced",
+    )
     parser.add_argument("--json", action="store_true", dest="json_output")
     args = parser.parse_args(argv)
-    report = run_validation(args.workdir)
+    report = run_validation(args.workdir, mode=args.mode)
     if args.json_output:
         print(json.dumps(report, indent=2, sort_keys=True))
     else:
-        print(f"bwrap validation status={report['status']} reason={report.get('reason', '')}")
+        print(
+            "bwrap validation "
+            f"mode={report.get('mode')} environment={report.get('environment_class')} "
+            f"status={report['status']} reason={report.get('reason', '')}"
+        )
         for item in report.get("checks", []):
             print(f"- [{item['status']}] {item['check_id']}: {item['reason']}")
-    return 0 if report["status"] in {"pass", "skipped"} else 1
+    return 0 if report["status"] == "pass" else 1
 
 
 if __name__ == "__main__":

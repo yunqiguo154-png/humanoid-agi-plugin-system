@@ -241,7 +241,7 @@ def collect_bwrap_validation(output_dir: Path) -> dict[str, Any]:
             "status": "skipped",
             "production_blocking": True,
             "reason": reason,
-            "recommendation": "Run scripts/validate_bwrap_sandbox.py --json on the target Linux+bwrap host.",
+            "recommendation": "Run scripts/validate_bwrap_sandbox.py --mode production-required --json on the target Linux+bwrap host.",
             "environment": {"os": platform.system(), "bwrap": shutil.which("bwrap")},
             "generated_at": now(),
         }
@@ -250,6 +250,8 @@ def collect_bwrap_validation(output_dir: Path) -> dict[str, Any]:
         [
             sys.executable,
             "scripts/validate_bwrap_sandbox.py",
+            "--mode",
+            "production-required",
             "--json",
         ],
         production_blocking_on_fail=True,

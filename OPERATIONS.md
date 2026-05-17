@@ -35,6 +35,23 @@ bwrap --version
 
 The production startup path fails closed if an enforced backend is unavailable. Integration tests skip the live bwrap test when Linux or `bwrap` is unavailable, but fail-closed policy tests always run.
 
+Validate bubblewrap in one of two explicit modes:
+
+```bash
+python scripts/validate_bwrap_sandbox.py --mode diagnostic --json
+python scripts/validate_bwrap_sandbox.py --mode production-required --json
+```
+
+`diagnostic` is for GitHub-hosted runners or local troubleshooting. It records backend capabilities and may return
+`fail` or `unsupported_environment`; it never satisfies release-gate production bwrap evidence. `production-required`
+is for a user-controlled Linux VM or a GitHub self-hosted runner labeled `self-hosted`, `linux`, `bwrap`. If the bwrap
+probe is not enforced in production-required mode, the script fails closed and does not run the validation sample plugin
+outside the sandbox.
+
+GitHub-hosted Ubuntu runners can fail bwrap probing with namespace or loopback errors such as
+`Failed RTM_NEWADDR: Operation not permitted`. That is a host capability limitation, not a reason to relax policy.
+Do not treat hosted diagnostic output as target production Linux+bwrap validation.
+
 Windows currently supports Job Object resource limits only. Treat Windows production as requiring an external container, VM, or other attested sandbox for third-party plugins.
 
 ## Registry Requirements
@@ -156,7 +173,7 @@ Next external acceptance steps for `v0.9.0-rc2`:
 
 1. Push the RC commit and tag to GitHub.
 2. Run GitHub Actions and archive the workflow run URL, head SHA, matrix jobs, ruff, mypy, unittest, and coverage result.
-3. On the target Linux+bwrap host, run `plugin-cli doctor --production --json` and `python scripts/validate_bwrap_sandbox.py --json`.
+3. On the target Linux+bwrap host, run `plugin-cli doctor --production --json` and `python scripts/validate_bwrap_sandbox.py --mode production-required --json`.
 4. Connect a real scanner such as pip-audit, OSV, Safety, Grype, or enterprise SCA; otherwise record a formal accepted risk for a controlled pilot.
 5. Connect an external append-only/SIEM/WORM audit anchor; otherwise record a formal accepted risk for a controlled pilot.
 6. Re-run `scripts/collect_rc_evidence.py` and `scripts/release_gate.py` with the external evidence paths.
@@ -189,7 +206,7 @@ python3 -m coverage report
 
 mkdir -p evidence
 plugin-cli doctor --production --json > evidence/doctor.json
-python3 scripts/validate_bwrap_sandbox.py --json > evidence/bwrap_validation.json
+python3 scripts/validate_bwrap_sandbox.py --mode production-required --json > evidence/bwrap_validation.json
 python3 scripts/run_production_acceptance.py --json --output evidence/acceptance_result.json
 python3 scripts/generate_audit_verify_evidence.py --output evidence/audit_verify.json  # requires post-RC2 main or a later RC tag
 python3 scripts/release_gate.py --json > evidence/release_gate.json
@@ -203,10 +220,42 @@ sudo apt-get install -y bubblewrap
 ```
 
 Record the Linux distribution, kernel, `bwrap --version`, Python version, commit SHA, and tag in the acceptance archive.
-Windows local evidence cannot replace this target Linux+bwrap validation. GitHub Actions Ubuntu also does not fully
-replace validation on the target production Linux host class. A skipped bwrap validation is not a pass.
+Windows local evidence cannot replace this target Linux+bwrap validation. GitHub Actions hosted Ubuntu diagnostic output
+also does not replace validation on the target production Linux host class. A skipped, unsupported, or diagnostic bwrap
+validation is not a pass. Release Gate only clears `bwrap.validation` with `mode=production-required`, a target or
+self-hosted Linux environment, enforced backend capabilities, and all critical sandbox checks passing.
 Scanner evidence and an external append-only/SIEM/WORM audit anchor still require real external evidence or formal risk
 acceptance before a controlled production pilot.
+
+## Self-Hosted Linux Bwrap Runner
+
+Use a self-hosted runner only for controlled branches or tags; do not attach an untrusted self-hosted runner to run
+unreviewed public pull requests.
+
+On the target Linux VM:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y git python3 python3-pip python3-venv bubblewrap
+```
+
+In GitHub, open `Settings -> Actions -> Runners -> New self-hosted runner`, choose Linux, then run the commands GitHub
+shows on the VM. Add labels:
+
+```text
+self-hosted
+linux
+bwrap
+```
+
+Trigger the workflow manually with `workflow_dispatch`. The `target linux bwrap production validation` job runs on
+`[self-hosted, linux, bwrap]` and uploads `target-linux-bwrap-production-evidence-${{ github.sha }}` containing:
+
+- `evidence/doctor.json`
+- `evidence/bwrap_validation.json`
+- `evidence/acceptance_result.json`
+- `evidence/audit_verify.json`
+- `evidence/release_gate.json`
 
 The legacy compatibility layer is not a production plugin execution path. Legacy `plugins/<name>/metadata.json + plugin.py` loading is development-only and is rejected in production mode. Migrate legacy plugins using `MIGRATION_GUIDE.md`.
 

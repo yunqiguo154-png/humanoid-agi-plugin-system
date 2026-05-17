@@ -72,7 +72,7 @@ class RcEvidenceToolTests(unittest.TestCase):
             GateInput(
                 ci={"status": "pass"},
                 doctor={"status": "pass", "production_blocking": False, "checks": []},
-                bwrap={"status": "pass"},
+                bwrap=self._production_bwrap_payload(),
                 audit={"status": "pass", "checkpoint": {"status": "success"}},
                 scan={"policy_decision": "pass"},
                 registry={"status": "pass"},
@@ -91,7 +91,7 @@ class RcEvidenceToolTests(unittest.TestCase):
             GateInput(
                 ci={"status": "pass"},
                 doctor={"status": "pass", "production_blocking": False, "checks": []},
-                bwrap={"status": "pass"},
+                bwrap=self._production_bwrap_payload(),
                 audit={"status": "pass", "checkpoint": {"status": "success"}},
                 scan={"policy_decision": "pass"},
                 registry={"status": "pass"},
@@ -162,6 +162,39 @@ class RcEvidenceToolTests(unittest.TestCase):
             "production_blocking": False,
             "reason": f"fake {evidence_id}",
             "generated_at": "2026-05-12T00:00:00+00:00",
+        }
+
+    def _production_bwrap_payload(self) -> dict[str, object]:
+        return {
+            "status": "pass",
+            "mode": "production-required",
+            "environment_class": "self_hosted",
+            "sandbox_backend": {
+                "enforced": True,
+                "capabilities": {
+                    "process_containment": True,
+                    "resource_limits": True,
+                    "filesystem_isolation": True,
+                    "network_isolation": True,
+                },
+            },
+            "checks": [
+                {"check_id": check_id, "status": "pass"}
+                for check_id in [
+                    "bwrap_backend_enforced",
+                    "bwrap_wrapped_command",
+                    "bwrap_unshared_network",
+                    "bwrap_private_tmp",
+                    "host_home_blocked",
+                    "env_blocked",
+                    "core_blocked",
+                    "code_readonly",
+                    "host_tmp_not_leaked",
+                    "direct_network_blocked",
+                    "data_write_allowed",
+                    "audit_records_present",
+                ]
+            ],
         }
 
 
