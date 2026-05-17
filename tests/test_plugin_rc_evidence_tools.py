@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
-import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -14,11 +13,12 @@ from scripts.drill_quarantine import run_drill as run_quarantine_drill
 from scripts.drill_registry_verify import run_drill as run_registry_drill
 from scripts.drill_revocation import run_drill as run_revocation_drill
 from scripts.drill_rollback import run_drill as run_rollback_drill
+from tests.test_utils import make_test_root
 
 
 class RcEvidenceToolTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.root = Path(tempfile.mkdtemp(prefix=f"{self._testMethodName}-", dir=Path.cwd() / "data" / "test_runs"))
+        self.root = make_test_root(self._testMethodName)
 
     def tearDown(self) -> None:
         shutil.rmtree(self.root, ignore_errors=True)

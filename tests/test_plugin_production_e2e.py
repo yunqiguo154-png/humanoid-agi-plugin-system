@@ -5,7 +5,6 @@ import os
 import shutil
 import subprocess
 import sys
-import tempfile
 import unittest
 import zipfile
 from pathlib import Path
@@ -29,11 +28,12 @@ from modules.plugin_system.signing import (
     sign_package,
     verify_signature,
 )
+from tests.test_utils import make_test_root
 
 
 class ProductionE2ETests(unittest.TestCase):
     def setUp(self) -> None:
-        self.root = Path(tempfile.mkdtemp(prefix=f"{self._testMethodName}-", dir=Path.cwd() / "data" / "test_runs"))
+        self.root = make_test_root(self._testMethodName)
         self.plugins_dir = self.root / "plugins"
         self.packages_dir = self.root / "packages"
         self.plugins_dir.mkdir(parents=True)

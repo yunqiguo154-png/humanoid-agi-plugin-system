@@ -4,7 +4,6 @@ import json
 import shutil
 import subprocess
 import sys
-import tempfile
 import unittest
 import zipfile
 from datetime import UTC, datetime, timedelta
@@ -33,11 +32,12 @@ from modules.plugin_system.scanner import (
 from modules.plugin_system.signing import generate_keypair, sign_package, verify_signature
 from modules.plugin_system.sbom import write_sbom
 from scripts.validate_bwrap_sandbox import run_validation
+from tests.test_utils import make_test_root
 
 
 class EnterpriseReadinessTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.root = Path(tempfile.mkdtemp(prefix=f"{self._testMethodName}-", dir=Path.cwd() / "data" / "test_runs"))
+        self.root = make_test_root(self._testMethodName)
         self.plugins_dir = self.root / "plugins"
         self.plugins_dir.mkdir(parents=True)
 

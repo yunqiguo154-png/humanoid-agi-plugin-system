@@ -58,6 +58,7 @@ from modules.plugin_system.signing import (
 )
 from modules.plugin_system.sbom import generate_sbom
 from modules.plugin_system.scanner import OfflineVulnerabilityScanner
+from tests.test_utils import make_test_root
 
 
 class _FakeNetworkResponse:
@@ -98,9 +99,7 @@ class _FailingDependencyScanner:
 
 class PluginSystemTests(unittest.TestCase):
     def setUp(self) -> None:
-        workspace_tmp = Path.cwd() / "data" / "test_runs" / f"{self._testMethodName}_{uuid.uuid4().hex}"
-        workspace_tmp.mkdir(parents=True, exist_ok=True)
-        self.root = workspace_tmp
+        self.root = make_test_root(self._testMethodName)
         self.plugins_dir = self.root / "plugins"
         self.packages_dir = self.root / "packages"
         self.packages_dir.mkdir()
@@ -4322,13 +4321,18 @@ def run(args, api=None):
         return metadata, gateway
 
     def _remove_tree(self, path: Path) -> None:
-        if not path.exists():
+        if not path.exists() and not path.is_symlink():
             return
-        for child in sorted(path.rglob("*"), reverse=True):
-            if child.is_file():
-                child.unlink()
+        if path.is_symlink() or path.is_file():
+            path.unlink(missing_ok=True)
+            return
+        for child in path.iterdir():
+            if child.is_symlink() or child.is_file():
+                child.unlink(missing_ok=True)
             elif child.is_dir():
-                child.rmdir()
+                self._remove_tree(child)
+            else:
+                child.unlink(missing_ok=True)
         path.rmdir()
 
 

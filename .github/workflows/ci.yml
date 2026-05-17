@@ -29,6 +29,9 @@ jobs:
       - name: Install package and dev tools
         run: python -m pip install -e ".[dev]"
 
+      - name: Prepare test runtime directories
+        run: python -c "from pathlib import Path; Path('data/test_runs').mkdir(parents=True, exist_ok=True)"
+
       - name: Lint
         run: python -m ruff check .
 

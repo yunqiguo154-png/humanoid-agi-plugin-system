@@ -5,18 +5,18 @@ import json
 import shutil
 import subprocess
 import sys
-import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from modules.plugin_system.release_gate import CONTROLLED_GO, GO, NO_GO, GateInput, evaluate_release_gate
 from scripts.run_production_acceptance import run_acceptance
+from tests.test_utils import make_test_root
 
 
 class ReleaseGateTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.root = Path(tempfile.mkdtemp(prefix=f"{self._testMethodName}-", dir=Path.cwd() / "data" / "test_runs"))
+        self.root = make_test_root(self._testMethodName)
 
     def tearDown(self) -> None:
         shutil.rmtree(self.root, ignore_errors=True)
