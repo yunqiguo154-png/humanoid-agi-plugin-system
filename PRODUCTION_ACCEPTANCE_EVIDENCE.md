@@ -8,7 +8,8 @@ This file records the current local RC evidence status. Do not treat missing or 
 |------|----------|
 | GitHub remote | `https://github.com/yunqiguo154-png/humanoid-agi-plugin-system.git`. |
 | GitHub push | `main`, `v0.9.0-rc1`, and `v0.9.0-rc2` were pushed to `origin`. |
-| Recommended validation tag | `v0.9.0-rc2`. |
+| Current pushed HEAD | `23cdbe9ca2f4b9781422955be1b27fe2a5488713` (`Diagnose and fix production bwrap validation worker execution`). |
+| Recommended validation tag | Create `v0.9.0-rc3` from current `main` before final archive. `v0.9.0-rc2` does not include the bwrap diagnostics patch. |
 | Historical RC tag | `v0.9.0-rc1` remains the local RC freeze point and was not moved. |
 | Post-RC2 note | This document revision adds bwrap worker diagnostics, bwrap-internal preflight, local audit evidence helper instructions, and separates GitHub-hosted bwrap diagnostic from target production validation after `v0.9.0-rc2`; do not move the tag. Create `v0.9.0-rc3` if these changes should be part of a tagged validation run. |
 | GitHub Actions | Stale for current HEAD. The archived run passed for an older commit and must not be treated as current HEAD CI evidence. |
@@ -18,22 +19,22 @@ This file records the current local RC evidence status. Do not treat missing or 
 | CI quality checks | Stale. The recorded run passed unittest, ruff, mypy, and coverage for the older CI evidence head. |
 | Coverage | 71% in stale CI evidence. |
 | CI evidence head SHA | `36e4fcd51209a05f6ca5902c53970ab4edebf601`; current HEAD is `7b0aa53773aef957a98c610967a5469cec962848`. |
-| Commit SHA | `7b0aa53773aef957a98c610967a5469cec962848` before RC2 validation documentation changes. |
+| Commit SHA | `23cdbe9ca2f4b9781422955be1b27fe2a5488713` for the bwrap diagnostics and VM evidence documentation update. |
 | Branch | `main`. |
 | Working tree status | Clean at local evidence review. Evidence JSON files are local artifacts and are ignored by Git. |
 | Release candidate tag | `v0.9.0-rc2` candidate only, not GA. |
 | Approver | Missing. No risk acceptance or release approval was provided. |
-| final go/no-go decision | NO_GO. External production evidence is still missing; see `evidence/release_gate.json`. |
+| final go/no-go decision | NO_GO. Target Linux+bwrap passed, but current-head CI, real scanner evidence, and external audit anchor or accepted risk are still missing; see `evidence_vm/release_gate.json` in the local evidence archive. |
 | Decision timestamp | See `generated_at` in `evidence/release_gate.json`. |
 
 ## Host Evidence
 
 | Item | Evidence |
 |------|----------|
-| OS / distro | Windows 11 local workstation; see `evidence/environment.json`. |
-| Kernel version | Missing for target Linux host. |
+| OS / distro | Windows 11 local workstation plus manually tested target Linux VM `humanoid-agi-linux-test`; Linux release details still need to be archived from the VM. |
+| Kernel version | Missing from copied VM evidence; archive `uname -a` with final target evidence. |
 | CPU architecture | AMD64 local workstation; see `evidence/environment.json`. |
-| Python version | Python 3.13.0 local workstation; see `evidence/environment.json`. |
+| Python version | Python 3.13.0 local workstation; target VM bwrap evidence used Python 3.11.15. |
 | `bwrap` version | Target VM reported bubblewrap 0.6.1 during manual testing; archive this in target evidence. |
 | Container / VM boundary, if any | Missing. |
 | External sandbox attestation, if used | Missing. |
@@ -42,8 +43,8 @@ This file records the current local RC evidence status. Do not treat missing or 
 
 Evidence path: `evidence/doctor.json`.
 
-Current result: fail / production_blocking. Windows is not a strong sandbox, target Linux+bwrap evidence is missing,
-and a real scanner is not configured.
+Current result from target VM: fail / production_blocking. Linux+bwrap now passes, but a real scanner is not configured
+and external audit anchoring is still missing.
 
 Command:
 
@@ -72,10 +73,30 @@ The script does not generate CI URLs or fake environment results. Any skipped st
 
 Evidence path: `evidence/bwrap_validation.json`.
 
-Current result: target Linux+bwrap production validation is still not passed. The target Linux VM has shown
-`sandbox_backend.enforced=true`, `probe.ok=true`, and required backend capabilities present, which means this is no
-longer the GitHub-hosted namespace limitation. The remaining failure is validation worker/runtime execution:
-the sample did not return valid JSON, so production validation remains fail-closed and production-blocking.
+Current result: target Linux+bwrap production validation passed on the controlled Linux VM after manually syncing the
+post-RC2 diagnostics patch because the VM could not reach GitHub over port 443. Evidence was copied back to
+`evidence_vm/bwrap_validation.json` for local review and is intentionally not committed because it contains machine
+paths and operational details.
+
+Verified evidence highlights:
+
+| Field | Value |
+| --- | --- |
+| `mode` | `production-required` |
+| `status` | `pass` |
+| `production_blocking` | `false` |
+| `generated_at` | `2026-05-17T13:52:59.381240+00:00` |
+| `sandbox_backend.name` | `bubblewrap` |
+| `sandbox_backend.enforced` | `true` |
+| `sandbox_backend.details.probe.ok` | `true` |
+| `sandbox_backend.details.binary` | `/usr/bin/bwrap` |
+| `preflight.status` | `pass` |
+| `preflight.python_version` | Python 3.11.15 |
+| Critical checks | `plugin_executed`, bwrap wrapper/network/tmp, host HOME, `.env`, core block, code readonly, private tmp, host tmp, direct network, data write, and audit records all `pass` |
+
+Because this VM was manually patched by `scp` while its Git checkout still reported old HEAD
+`168887e666167617abffc89295dab80446ea9fba`, final archive should create `v0.9.0-rc3` at current `main`, update the VM
+to that commit, and rerun the same command so the evidence SHA and tag align.
 
 GitHub-hosted diagnostic command and artifact:
 
@@ -214,17 +235,17 @@ List accepted risks from `RISK_REGISTER.md`, including owner and expiry/review d
 | `evidence/ci_result.json` | stale for current HEAD. The recorded run passed older head `36e4fcd51209a05f6ca5902c53970ab4edebf601`; current HEAD was `7b0aa53773aef957a98c610967a5469cec962848` before this documentation/tooling update. |
 | `evidence/doctor.json` | fail, production_blocking. |
 | `evidence/bwrap_diagnostic_github_hosted.json` | fail / unsupported_environment diagnostic only; production_blocking and not Release Gate pass evidence. |
-| `evidence/bwrap_validation.json` | Target VM backend probe reached enforced=true, but worker/runtime validation did not pass; production_blocking for full production. |
+| `evidence/bwrap_validation.json` | Target Linux VM production-required validation passed in copied local archive `evidence_vm/bwrap_validation.json`; rerun on an aligned `v0.9.0-rc3` checkout for final archive. |
 | `evidence/acceptance_result.json` | not_ready. |
 | `evidence/audit_verify.json` | warn: local hash chain and checkpoint verified, but external append-only/SIEM/WORM anchor is missing and controlled risk is required. |
 | `evidence/scanner_report.json` | missing, production_blocking. |
-| `evidence/registry_verify.json` | pass locally: signed index, package sha256, unsigned registry rejection, tampered registry rejection. |
-| `evidence/revocation_drill.json` | pass locally: revoked signer key, revoked plugin version, installed revoked plugin denial, audit event. |
-| `evidence/quarantine_drill.json` | pass locally: admin quarantine, future call denial, audit event, visible status update. |
-| `evidence/rollback_drill.json` | pass locally: failed update rollback, downgrade rejection, same-version replacement rejection, audit event. |
-| `evidence/release_gate.json` | NO_GO. |
+| `evidence/registry_verify.json` | pass in copied VM archive: registry verification drill passed. |
+| `evidence/revocation_drill.json` | pass in copied VM archive: revocation drill passed. |
+| `evidence/quarantine_drill.json` | pass in copied VM archive: quarantine drill passed. |
+| `evidence/rollback_drill.json` | pass in copied VM archive: rollback drill passed. |
+| `evidence/release_gate.json` | NO_GO in copied VM archive. Remaining production blockers: `ci.matrix`, `scanner.configured`, `doctor.production_blocking`, `audit.verify`, `scanner.policy`. |
 
 Windows workstation evidence cannot replace target Linux+bwrap evidence. Local hash chains and local checkpoints cannot
 replace an external append-only/SIEM/WORM audit anchor. Offline scanner fixture output cannot replace real vulnerability
 intelligence. GitHub-hosted bwrap diagnostic cannot replace target production Linux host validation. The release remains
-`v0.9.0-rc2`, not GA.
+not GA. Create `v0.9.0-rc3` from current `main` before the final aligned validation archive.

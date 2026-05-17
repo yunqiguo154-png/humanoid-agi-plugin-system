@@ -32,3 +32,6 @@ evidence/*.json
 evidence/*.txt
 evidence/*.jsonl
 !evidence/.gitkeep
+
+# Copied production/VM evidence may contain host paths or operational details.
+evidence_vm/
